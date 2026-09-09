@@ -157,9 +157,14 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 
 		var owned []string
 		var missing []string
+		omnibus := strings.Contains(strings.ToLower(series.Name), "omnibus")
 		for i := 1; i <= total; i++ {
 			if title, ok := series.OwnedBooks[i]; ok {
 				owned = append(owned, title)
+			} else if omnibus && i%2 == 0 {
+				// Omnibus editions commonly publish odd-numbered books only;
+				// even numbers are component volumes, not missing releases.
+				continue
 			} else {
 				missing = append(missing, fmt.Sprintf("%s Book %d", series.Name, i))
 			}
