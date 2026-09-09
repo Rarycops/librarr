@@ -137,6 +137,16 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 	}
 
 	// Build series info with missing book detection.
+	trackedTotals := make(map[string]int)
+	if tracked, err := d.db.GetSeriesTracking(); err == nil {
+		for _, item := range tracked {
+			name, _ := item["series_name"].(string)
+			total, _ := item["known_total"].(int)
+			if name != "" && total > 0 {
+				trackedTotals[strings.ToLower(name)] = total
+			}
+		}
+	}
 	var result []SeriesInfo
 	for _, series := range seriesMap {
 		if len(series.OwnedBooks) < 2 {
@@ -153,6 +163,9 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 
 		// Try to get total from Open Library.
 		total := maxNum
+		if tracked := trackedTotals[strings.ToLower(series.Name)]; tracked > total {
+			total = tracked
+		}
 		if !series.Manga {
 			olTotal := d.getOpenLibrarySeriesTotal(series.Name)
 			if olTotal > total {

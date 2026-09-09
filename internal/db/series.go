@@ -51,3 +51,14 @@ func (d *DB) GetSeriesTracking() ([]map[string]interface{}, error) {
 	}
 	return result, nil
 }
+
+// SetSeriesTrackingTotal persists an operator-provided expected volume total.
+func (d *DB) SetSeriesTrackingTotal(seriesName string, knownTotal int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.db.Exec(
+		"UPDATE series_tracking SET known_total=?, last_checked=? WHERE lower(series_name)=lower(?)",
+		knownTotal, float64(time.Now().Unix()), seriesName,
+	)
+	return err
+}

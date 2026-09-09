@@ -194,6 +194,29 @@ func (s *Server) handleSeriesMissing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSetSeriesTotal stores an operator-provided expected volume total.
+func (s *Server) handleSetSeriesTotal(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req struct {
+		KnownTotal int `json:"known_total"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.KnownTotal < 1 || req.KnownTotal > 500 {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "known_total must be between 1 and 500",
+		})
+		return
+	}
+	if err := s.db.SetSeriesTrackingTotal(name, req.KnownTotal); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true, "series": name, "known_total": req.KnownTotal,
+	})
+}
+
 // handleSearchMissingSeries searches for missing books in a series.
 func (s *Server) handleSearchMissingSeries(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")

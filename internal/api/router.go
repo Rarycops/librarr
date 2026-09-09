@@ -331,6 +331,7 @@ func (s *Server) registerLibraryRoutes() {
 	// Series auto-complete.
 	s.mux.HandleFunc("GET /api/series", s.handleListSeries)
 	s.mux.HandleFunc("GET /api/series/{name}/missing", s.handleSeriesMissing)
+	s.mux.HandleFunc("PUT /api/series/{name}/total", requireAdmin(s.handleSetSeriesTotal))
 	s.mux.HandleFunc("POST /api/series/{name}/search-missing", s.handleSearchMissingSeries)
 
 	// Tags.
