@@ -97,7 +97,12 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 // matches the ABS handler (items/total/page/pages) so the UI's existing
 // pagination code works against both code paths.
 func (s *Server) serveLocalLibraryByMediaType(w http.ResponseWriter, r *http.Request, mediaType string) {
-	const pageSize = 100
+	pageSize := 100
+	if mediaType == "manga" {
+		// ponytail: group the full manga library before rendering series cards;
+		// raise this ceiling if a library exceeds 1000 manga files.
+		pageSize = 1000
+	}
 	page := queryInt(r, "page", 1)
 	if page < 1 {
 		page = 1
