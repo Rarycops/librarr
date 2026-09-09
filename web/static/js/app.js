@@ -168,6 +168,7 @@ const I18N = {
     wanted_state_downloading: 'Downloading',
     wanted_state_satisfied: 'Satisfied',
     wanted_state_unmonitored: 'Unmonitored',
+    wanted_state_owned: 'Owned',
     wanted_search_all: 'Search all now',
     wanted_search_now: 'Search now',
     wanted_explain: 'Why?',
@@ -410,6 +411,7 @@ const I18N = {
     wanted_state_downloading: 'Загружается',
     wanted_state_satisfied: 'Готово',
     wanted_state_unmonitored: 'Не отслеживается',
+    wanted_state_owned: 'В библиотеке',
     wanted_search_all: 'Искать всё сейчас',
     wanted_search_now: 'Искать',
     wanted_monitored: 'Отслеживать',
@@ -562,6 +564,7 @@ const state = {
   sortMode: 'relevance',
   libraryPage: 1,
   libraryPages: 1,
+  mangaGroups: new Map(),
   config: null,
   downloadPollTimer: null,
   currentUser: null,
@@ -1747,6 +1750,13 @@ async function loadLibrary() {
   const tab = state.libraryTab;
   const q = document.getElementById('library-search').value.trim();
   const page = state.libraryPage;
+  if (tab === 'manga' && !state.wanted) {
+    try {
+      state.wanted = await apiJson('/api/wishlist');
+    } catch (err) {
+      if (err.message === 'Unauthorized') return;
+    }
+  }
 
   const endpoints = {
     ebooks: `/api/library?page=${page}${q ? '&q=' + encodeURIComponent(q) : ''}`,
@@ -1945,38 +1955,80 @@ function renderMangaSeriesGroups(items) {
     if (!groups.has(title)) groups.set(title, []);
     groups.get(title).push(item);
   }
+  state.mangaGroups = groups;
 
   return [...groups.entries()].map(([title, volumes], index) => {
     const coverURL = `/api/library/manga/cover?series=${encodeURIComponent(title)}`;
     const fallback = makePlaceholderHtml(title, index);
-    const volumeRows = volumes.map((item) => {
-      const format = item.file_format || (item.file_path || '').split('.').pop() || '';
-      return `
-        <div class="flex items-center justify-between gap-3 rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-          <span class="text-sm text-slate-200">${escapeHtml(mangaVolumeLabel(item))}</span>
-          <span class="text-xs uppercase text-slate-500">${escapeHtml(format)}</span>
-        </div>`;
-    }).join('');
+    const wanted = (state.wanted?.items || []).find((item) => (
+      String(item.title || '').toLowerCase() === title.toLowerCase()
+    ));
+    const stateKey = wanted?.state || 'owned';
+    const stateLabel = wantedStateLabel(stateKey);
+    const stateStyle = {
+      missing: 'bg-amber-500/20 text-amber-300',
+      downloading: 'bg-indigo-500/20 text-indigo-300',
+      satisfied: 'bg-emerald-500/20 text-emerald-300',
+      unmonitored: 'bg-slate-700 text-slate-400',
+      owned: 'bg-slate-700 text-slate-300',
+    }[stateKey] || 'bg-slate-700 text-slate-300';
 
     return `
-      <article class="col-span-full rounded-xl border border-slate-800 bg-slate-900/70 overflow-hidden">
+      <article class="rounded-xl border border-slate-800 bg-slate-900/70 overflow-hidden">
         <div class="flex items-center gap-4 p-4">
           <div class="relative w-20 h-28 shrink-0 overflow-hidden rounded-lg">
             <img src="${escapeHtml(coverURL)}" alt="" class="w-full h-full object-cover"
-              onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden')">
+              data-manga-cover data-ph-title="${escapeHtml(title)}" data-ph-idx="${index}">
             <div class="hidden w-full h-full">${fallback}</div>
           </div>
-          <div>
-            <h3 class="text-lg font-semibold text-white">${escapeHtml(title)}</h3>
+          <div class="min-w-0">
+            <h3 class="text-lg font-semibold text-white line-clamp-2">${escapeHtml(title)}</h3>
             <p class="text-sm text-slate-400">${volumes.length} volume${volumes.length === 1 ? '' : 's'}</p>
+            <span class="inline-block mt-2 rounded-full px-2 py-0.5 text-xs ${stateStyle}">${escapeHtml(stateLabel)}</span>
           </div>
         </div>
-        <details class="border-t border-slate-800">
-          <summary class="cursor-pointer px-4 py-3 text-sm text-indigo-300 hover:text-indigo-200">Show volumes</summary>
-          <div class="grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3">${volumeRows}</div>
-        </details>
+        <button data-action="openMangaSeries" data-series-title="${escapeHtml(title)}"
+          class="w-full border-t border-slate-800 px-4 py-3 text-left text-sm text-indigo-300 hover:text-indigo-200">
+          Open volumes
+        </button>
       </article>`;
   }).join('');
+}
+
+function openMangaSeries(title) {
+  const volumes = state.mangaGroups.get(title) || [];
+  const wanted = (state.wanted?.items || []).find((item) => (
+    String(item.title || '').toLowerCase() === title.toLowerCase()
+  ));
+  const stateLabel = wantedStateLabel(wanted?.state || 'owned');
+  let modal = document.getElementById('manga-series-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'manga-series-modal';
+    modal.className = 'fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4';
+    document.body.appendChild(modal);
+  }
+  const rows = volumes.map((item) => {
+    const format = item.file_format || (item.file_path || '').split('.').pop() || '';
+    return `<div class="flex items-center justify-between gap-3 rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
+      <span class="text-sm text-slate-200">${escapeHtml(mangaVolumeLabel(item))}</span>
+      <span class="text-xs uppercase text-slate-500">${escapeHtml(format)}</span>
+    </div>`;
+  }).join('');
+  modal.innerHTML = `<div class="w-full max-w-2xl max-h-[85vh] overflow-auto rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+    <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+      <div><h2 class="text-xl font-semibold text-white">${escapeHtml(title)}</h2>
+      <p class="text-sm text-slate-400">${volumes.length} volumes · ${escapeHtml(stateLabel)}</p></div>
+      <button data-action="closeMangaSeries" class="text-2xl text-slate-400 hover:text-white" aria-label="Close">×</button>
+    </div>
+    <div class="grid gap-2 p-5 sm:grid-cols-2">${rows}</div>
+  </div>`;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeMangaSeries() {
+  document.getElementById('manga-series-modal')?.classList.add('hidden');
 }
 
 async function deleteLibraryItem(id, type, title) {
@@ -3375,6 +3427,7 @@ document.addEventListener('keydown', (e) => {
   // Escape → close modals, clear search
   if (e.key === 'Escape') {
     hideWishlistForm();
+    closeMangaSeries();
   }
 });
 
@@ -3448,6 +3501,8 @@ const CLICK_ACTIONS = {
   },
   retryDownload: el => retryDownload(el.dataset.jobId),
   deleteLibraryItem: el => deleteLibraryItem(el.dataset.id, el.dataset.type, el.dataset.title),
+  openMangaSeries: el => openMangaSeries(el.dataset.seriesTitle),
+  closeMangaSeries: () => closeMangaSeries(),
   goLibraryPage: el => goLibraryPage(+el.dataset.page),
   searchWishlistItem: el => searchWishlistItem(el.dataset.title, el.dataset.mediaType),
   deleteWishlistItem: el => deleteWishlistItem(+el.dataset.id),
@@ -3504,6 +3559,11 @@ document.addEventListener('change', e => {
 // bubble, so listen in the capture phase.
 document.addEventListener('error', e => {
   const img = e.target;
+  if (img instanceof HTMLImageElement && img.dataset.mangaCover !== undefined) {
+    img.style.display = 'none';
+    img.nextElementSibling?.classList.remove('hidden');
+    return;
+  }
   if (img instanceof HTMLImageElement && img.dataset.phTitle !== undefined) {
     img.outerHTML = window.makePlaceholder(img.dataset.phTitle, +(img.dataset.phIdx || 0));
   }
