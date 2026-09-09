@@ -1772,9 +1772,9 @@ async function loadLibrary() {
 
     emptyEl.classList.add('hidden');
 
-    // Group items by series and render with section headers
+    // Manga is stored one file per row; present it as series → volumes.
     const renderFn = tab === 'ebooks' ? renderLibraryEbook : tab === 'audiobooks' ? renderLibraryAudiobook : renderLibraryManga;
-    container.innerHTML = renderGroupedBySeries(items, renderFn);
+    container.innerHTML = tab === 'manga' ? renderMangaSeriesGroups(items) : renderGroupedBySeries(items, renderFn);
 
     // Pagination
     if (state.libraryPages > 1) {
@@ -1929,6 +1929,54 @@ function renderLibraryManga(item, index) {
       </div>
     </div>
   `;
+}
+
+function mangaVolumeLabel(item) {
+  const path = item.file_path || '';
+  const match = path.match(/[/\\](Volume\s+\d+(?:\s+\([^/\\)]+\))?)[/\\]/i);
+  if (match) return match[1];
+  return (path.split(/[\\/]/).pop() || item.title || 'Volume').replace(/\.[^.]+$/, '');
+}
+
+function renderMangaSeriesGroups(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const title = item.title || item.name || 'Unknown';
+    if (!groups.has(title)) groups.set(title, []);
+    groups.get(title).push(item);
+  }
+
+  return [...groups.entries()].map(([title, volumes], index) => {
+    const coverURL = `/api/library/manga/cover?series=${encodeURIComponent(title)}`;
+    const fallback = makePlaceholderHtml(title, index);
+    const volumeRows = volumes.map((item) => {
+      const format = item.file_format || (item.file_path || '').split('.').pop() || '';
+      return `
+        <div class="flex items-center justify-between gap-3 rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
+          <span class="text-sm text-slate-200">${escapeHtml(mangaVolumeLabel(item))}</span>
+          <span class="text-xs uppercase text-slate-500">${escapeHtml(format)}</span>
+        </div>`;
+    }).join('');
+
+    return `
+      <article class="col-span-full rounded-xl border border-slate-800 bg-slate-900/70 overflow-hidden">
+        <div class="flex items-center gap-4 p-4">
+          <div class="relative w-20 h-28 shrink-0 overflow-hidden rounded-lg">
+            <img src="${escapeHtml(coverURL)}" alt="" class="w-full h-full object-cover"
+              onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden')">
+            <div class="hidden w-full h-full">${fallback}</div>
+          </div>
+          <div>
+            <h3 class="text-lg font-semibold text-white">${escapeHtml(title)}</h3>
+            <p class="text-sm text-slate-400">${volumes.length} volume${volumes.length === 1 ? '' : 's'}</p>
+          </div>
+        </div>
+        <details class="border-t border-slate-800">
+          <summary class="cursor-pointer px-4 py-3 text-sm text-indigo-300 hover:text-indigo-200">Show volumes</summary>
+          <div class="grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3">${volumeRows}</div>
+        </details>
+      </article>`;
+  }).join('');
 }
 
 async function deleteLibraryItem(id, type, title) {

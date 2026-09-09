@@ -308,6 +308,7 @@ func (s *Server) registerLibraryRoutes() {
 	s.mux.HandleFunc("GET /api/library", s.handleLibrary)
 	s.mux.HandleFunc("GET /api/library/audiobooks", s.handleLibraryAudiobooks)
 	s.mux.HandleFunc("GET /api/library/manga", s.handleLibraryManga)
+	s.mux.HandleFunc("GET /api/library/manga/cover", s.handleMangaCover)
 	s.mux.HandleFunc("DELETE /api/library/book/{id}", s.handleDeleteBook)
 	s.mux.HandleFunc("DELETE /api/library/audiobook/{id}", s.handleDeleteAudiobook)
 	s.mux.HandleFunc("GET /api/stats", s.handleStats)
