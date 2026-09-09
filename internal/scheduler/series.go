@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,15 +36,17 @@ type SeriesDetector struct {
 	searchMgr     *search.Manager
 	webhookSender *webhook.Sender
 	httpClient    *http.Client
+	mangaRoot     string
 }
 
 // NewSeriesDetector creates a new series detector.
-func NewSeriesDetector(database *db.DB, searchMgr *search.Manager, ws *webhook.Sender) *SeriesDetector {
+func NewSeriesDetector(database *db.DB, searchMgr *search.Manager, ws *webhook.Sender, mangaRoot string) *SeriesDetector {
 	return &SeriesDetector{
 		db:            database,
 		searchMgr:     searchMgr,
 		webhookSender: ws,
 		httpClient:    &http.Client{Timeout: 15 * time.Second},
+		mangaRoot:     mangaRoot,
 	}
 }
 
@@ -52,6 +55,32 @@ var seriesPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^(.+?)[\s,:-]+(?:book|vol\.?|volume|#)\s*(\d+)`),
 	regexp.MustCompile(`(?i)^(.+?)\s*\((\d+)\)`),
 	regexp.MustCompile(`(?i)^(.+?)\s+(\d+)$`),
+}
+
+var mangaVolumePattern = regexp.MustCompile(`(?i)(?:^|[\s._-])(?:volume|vol|v)\s*0*(\d+)(?:\b|[^\d])`)
+
+func (d *SeriesDetector) mangaVolume(item models.LibraryItem) (string, int, bool) {
+	if item.MediaType != "manga" || d.mangaRoot == "" {
+		return "", 0, false
+	}
+	relative, err := filepath.Rel(d.mangaRoot, item.FilePath)
+	if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
+		return "", 0, false
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	if len(parts) < 2 {
+		return "", 0, false
+	}
+	series := parts[0]
+	for _, part := range parts[1:] {
+		if match := mangaVolumePattern.FindStringSubmatch(part); len(match) == 2 {
+			number, err := strconv.Atoi(match[1])
+			if err == nil && number > 0 {
+				return series, number, true
+			}
+		}
+	}
+	return "", 0, false
 }
 
 // DetectedSeries represents a series found in the library.
@@ -71,6 +100,17 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 	seriesMap := make(map[string]*DetectedSeries)
 
 	for _, item := range items {
+		if seriesName, volume, ok := d.mangaVolume(item); ok {
+			key := strings.ToLower(seriesName)
+			if _, exists := seriesMap[key]; !exists {
+				seriesMap[key] = &DetectedSeries{
+					Name:       seriesName,
+					OwnedBooks: make(map[int]string),
+				}
+			}
+			seriesMap[key].OwnedBooks[volume] = item.Title
+			continue
+		}
 		for _, pat := range seriesPatterns {
 			matches := pat.FindStringSubmatch(item.Title)
 			if len(matches) >= 3 {

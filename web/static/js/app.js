@@ -565,6 +565,7 @@ const state = {
   libraryPage: 1,
   libraryPages: 1,
   mangaGroups: new Map(),
+  seriesTracking: [],
   config: null,
   downloadPollTimer: null,
   currentUser: null,
@@ -1769,7 +1770,11 @@ async function loadLibrary() {
   const paginationEl = document.getElementById('library-pagination');
 
   try {
-    const data = await apiJson(endpoints[tab]);
+  const [data, tracking] = await Promise.all([
+    apiJson(endpoints[tab]),
+    tab === 'manga' ? apiJson('/api/series').catch(() => ({ series: [] })) : Promise.resolve({ series: [] }),
+  ]);
+  if (tab === 'manga') state.seriesTracking = tracking.series || [];
     const items = data.items || [];
     state.libraryPages = data.pages || 1;
 
@@ -1963,7 +1968,10 @@ function renderMangaSeriesGroups(items) {
     const wanted = (state.wanted?.items || []).find((item) => (
       String(item.title || '').toLowerCase() === title.toLowerCase()
     ));
-    const stateKey = wanted?.state || 'owned';
+    const tracked = state.seriesTracking.find((item) => (
+      String(item.series_name || '').toLowerCase() === title.toLowerCase()
+    ));
+    const stateKey = tracked?.missing_books?.length ? 'missing' : (wanted?.state || 'owned');
     const stateLabel = wantedStateLabel(stateKey);
     const stateStyle = {
       missing: 'bg-amber-500/20 text-amber-300',
@@ -2000,7 +2008,11 @@ function openMangaSeries(title) {
   const wanted = (state.wanted?.items || []).find((item) => (
     String(item.title || '').toLowerCase() === title.toLowerCase()
   ));
-  const stateLabel = wantedStateLabel(wanted?.state || 'owned');
+  const tracked = state.seriesTracking.find((item) => (
+    String(item.series_name || '').toLowerCase() === title.toLowerCase()
+  ));
+  const missing = tracked?.missing_books || [];
+  const stateLabel = wantedStateLabel(missing.length ? 'missing' : (wanted?.state || 'owned'));
   let modal = document.getElementById('manga-series-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -2015,13 +2027,23 @@ function openMangaSeries(title) {
       <span class="text-xs uppercase text-slate-500">${escapeHtml(format)}</span>
     </div>`;
   }).join('');
+  const missingHtml = missing.length
+    ? `<div class="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+        <p class="text-sm font-medium text-amber-200">Missing volumes: ${missing.length}</p>
+        <p class="mt-1 text-xs text-amber-300/80">${escapeHtml(missing.join(', '))}</p>
+        <button data-action="requestMangaMissing" data-series-title="${escapeHtml(title)}"
+          class="mt-3 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-500/30">
+          Request missing
+        </button>
+      </div>`
+    : '';
   modal.innerHTML = `<div class="w-full max-w-2xl max-h-[85vh] overflow-auto rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
     <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
       <div><h2 class="text-xl font-semibold text-white">${escapeHtml(title)}</h2>
       <p class="text-sm text-slate-400">${volumes.length} volumes · ${escapeHtml(stateLabel)}</p></div>
       <button data-action="closeMangaSeries" class="text-2xl text-slate-400 hover:text-white" aria-label="Close">×</button>
     </div>
-    <div class="grid gap-2 p-5 sm:grid-cols-2">${rows}</div>
+    <div class="p-5">${missingHtml}<div class="mt-4 grid gap-2 sm:grid-cols-2">${rows}</div></div>
   </div>`;
   modal.classList.remove('hidden');
   modal.classList.add('flex');
@@ -2029,6 +2051,26 @@ function openMangaSeries(title) {
 
 function closeMangaSeries() {
   document.getElementById('manga-series-modal')?.classList.add('hidden');
+}
+
+async function requestMangaMissing(title) {
+  const tracked = state.seriesTracking.find((item) => (
+    String(item.series_name || '').toLowerCase() === title.toLowerCase()
+  ));
+  const missing = tracked?.missing_books || [];
+  const existing = new Set((state.wanted?.items || []).map((item) => item.title.toLowerCase()));
+  let added = 0;
+  for (const volume of missing) {
+    if (existing.has(volume.toLowerCase())) continue;
+    await apiJson('/api/wishlist', {
+      method: 'POST',
+      body: JSON.stringify({ title: volume, media_type: 'manga', monitored: true }),
+    });
+    added++;
+  }
+  await loadWishlist();
+  showToast(added ? `Requested ${added} missing volume${added === 1 ? '' : 's'}` : 'Missing volumes already requested', 'success');
+  openMangaSeries(title);
 }
 
 async function deleteLibraryItem(id, type, title) {
@@ -3503,6 +3545,7 @@ const CLICK_ACTIONS = {
   deleteLibraryItem: el => deleteLibraryItem(el.dataset.id, el.dataset.type, el.dataset.title),
   openMangaSeries: el => openMangaSeries(el.dataset.seriesTitle),
   closeMangaSeries: () => closeMangaSeries(),
+  requestMangaMissing: el => requestMangaMissing(el.dataset.seriesTitle),
   goLibraryPage: el => goLibraryPage(+el.dataset.page),
   searchWishlistItem: el => searchWishlistItem(el.dataset.title, el.dataset.mediaType),
   deleteWishlistItem: el => deleteWishlistItem(+el.dataset.id),

@@ -98,7 +98,7 @@ func NewServer(cfg *config.Config, database *db.DB, searchMgr *search.Manager, d
 	// Initialize scheduler, series detector, and author monitor.
 	sched := scheduler.NewScheduler(cfg, database, searchMgr, downloadMgr, ws)
 	wishlistClean := scheduler.NewWishlistCleaner(cfg, database)
-	seriesDet := scheduler.NewSeriesDetector(database, searchMgr, ws)
+	seriesDet := scheduler.NewSeriesDetector(database, searchMgr, ws, cfg.MangaDir)
 	authorMon := scheduler.NewAuthorMonitor(cfg, database, ws)
 	authorMon.SetOpenLibraryURL(cfg.OpenLibraryURL)
 
