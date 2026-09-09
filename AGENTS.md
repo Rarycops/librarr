@@ -76,7 +76,7 @@ After a successful tag build, update
 ```yaml
 image:
   repository: ghcr.io/rarycops/librarr
-  tag: "1.3.1"
+  tag: "v1.3.1"
 ```
 
 Preserve the deployment contract already used by HomeServer:

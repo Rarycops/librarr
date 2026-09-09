@@ -1909,18 +1909,21 @@ function renderLibraryAudiobook(item, index) {
 }
 
 function renderLibraryManga(item, index) {
+  const title = item.title || item.name || '?';
   const coverHtml = item.cover_url
-    ? `<img src="${escapeHtml(item.cover_url)}" alt="" class="w-full h-48 object-cover" loading="lazy" data-ph-title="${escapeHtml(item.name || '')}" data-ph-idx="${index}">`
-    : makePlaceholderHtml(item.name || '?', index);
+    ? `<img src="${escapeHtml(item.cover_url)}" alt="" class="w-full h-48 object-cover" loading="lazy" data-ph-title="${escapeHtml(title)}" data-ph-idx="${index}">`
+    : makePlaceholderHtml(title, index);
+  const format = item.file_format || (item.file_path || '').split('.').pop() || '';
 
   return `
     <div class="book-card bg-slate-900 rounded-xl overflow-hidden border border-slate-800 hover:border-slate-600">
       ${coverHtml}
       <div class="p-3">
-        <h3 class="text-sm font-semibold text-white line-clamp-2 mb-1">${escapeHtml(item.name || 'Unknown')}</h3>
+        <h3 class="text-sm font-semibold text-white line-clamp-2 mb-1">${escapeHtml(title)}</h3>
+        ${item.author ? `<p class="text-xs text-slate-400 line-clamp-1 mb-1">${escapeHtml(item.author)}</p>` : ''}
         <div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
-          ${item.pages ? `<span>${t('n_pages', {n: item.pages})}</span>` : ''}
-          ${item.library ? `<span>${escapeHtml(item.library)}</span>` : ''}
+          ${format ? `<span class="uppercase">${escapeHtml(format)}</span>` : ''}
+          ${item.file_size ? `<span>${escapeHtml(formatSize(item.file_size))}</span>` : ''}
         </div>
         ${item.kavita_url ? `<a href="${escapeHtml(item.kavita_url)}" target="_blank" class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">${t('open_in_kavita')}</a>` : ''}
       </div>
