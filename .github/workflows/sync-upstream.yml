@@ -1,0 +1,49 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream main
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/JeremiahM37/librarr.git
+          git fetch --prune upstream main
+          git checkout -B upstream-sync origin/main
+          if ! git merge --no-commit --no-ff upstream/main; then
+            git merge --abort || true
+            echo "::error::Upstream sync has merge conflicts; resolve them manually."
+            exit 1
+          fi
+
+      - name: Open or update upstream PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/upstream-sync
+          delete-branch: true
+          base: main
+          title: "Sync upstream Librarr"
+          commit-message: "Sync upstream Librarr"
+          body: |
+            Nightly synchronization from `JeremiahM37/librarr:main`.
+
+            This PR is intentionally not auto-merged. Review source changes and
+            run the fork checks before merging.
+          labels: upstream-sync
