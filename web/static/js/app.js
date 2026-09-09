@@ -1770,11 +1770,8 @@ async function loadLibrary() {
   const paginationEl = document.getElementById('library-pagination');
 
   try {
-  const [data, tracking] = await Promise.all([
-    apiJson(endpoints[tab]),
-    tab === 'manga' ? apiJson('/api/series').catch(() => ({ series: [] })) : Promise.resolve({ series: [] }),
-  ]);
-  if (tab === 'manga') state.seriesTracking = tracking.series || [];
+  if (tab === 'manga') state.seriesTracking = [];
+  const data = await apiJson(endpoints[tab]);
     const items = data.items || [];
     state.libraryPages = data.pages || 1;
 
@@ -1790,6 +1787,15 @@ async function loadLibrary() {
     // Manga is stored one file per row; present it as series → volumes.
     const renderFn = tab === 'ebooks' ? renderLibraryEbook : tab === 'audiobooks' ? renderLibraryAudiobook : renderLibraryManga;
     container.innerHTML = tab === 'manga' ? renderMangaSeriesGroups(items) : renderGroupedBySeries(items, renderFn);
+
+    if (tab === 'manga') {
+      apiJson('/api/series').then((tracking) => {
+        state.seriesTracking = tracking.series || [];
+        if (state.libraryTab === 'manga' && state.libraryPage === page) {
+          container.innerHTML = renderMangaSeriesGroups(items);
+        }
+      }).catch(() => {});
+    }
 
     // Pagination
     if (state.libraryPages > 1) {

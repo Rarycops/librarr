@@ -87,6 +87,7 @@ func (d *SeriesDetector) mangaVolume(item models.LibraryItem) (string, int, bool
 type DetectedSeries struct {
 	Name       string
 	OwnedBooks map[int]string // book number -> title
+	Manga      bool
 }
 
 // DetectSeries scans the library for series patterns and returns detected series.
@@ -106,8 +107,10 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 				seriesMap[key] = &DetectedSeries{
 					Name:       seriesName,
 					OwnedBooks: make(map[int]string),
+					Manga:      true,
 				}
 			}
+			seriesMap[key].Manga = true
 			seriesMap[key].OwnedBooks[volume] = item.Title
 			continue
 		}
@@ -150,9 +153,11 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 
 		// Try to get total from Open Library.
 		total := maxNum
-		olTotal := d.getOpenLibrarySeriesTotal(series.Name)
-		if olTotal > total {
-			total = olTotal
+		if !series.Manga {
+			olTotal := d.getOpenLibrarySeriesTotal(series.Name)
+			if olTotal > total {
+				total = olTotal
+			}
 		}
 
 		var owned []string

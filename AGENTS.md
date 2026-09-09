@@ -50,7 +50,7 @@ The inherited [release workflow](.github/workflows/release.yml) is the
 container pipeline. A tag is the promotion event:
 
 ```bash
-version=1.3.8
+version=1.3.9
 test "$(tr -d '[:space:]' < internal/version/VERSION)" = "$version"
 go test ./... -count=1
 git tag -a "v$version" -m "Librarr v$version"
@@ -76,7 +76,7 @@ After a successful tag build, update
 ```yaml
 image:
   repository: ghcr.io/rarycops/librarr
-  tag: "v1.3.8"
+  tag: "v1.3.9"
 ```
 
 Preserve the deployment contract already used by HomeServer:
