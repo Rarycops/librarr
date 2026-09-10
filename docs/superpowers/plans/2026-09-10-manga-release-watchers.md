@@ -6,7 +6,7 @@
 
 **Architecture:** Keep `series_tracking` as the watcher/control-plane record and add a normalized `manga_releases` catalog table. A PRH catalog provider fetches public monthly title-list data, the watcher queues only due future releases into the existing wishlist, and the current scheduler handles search, quality, qBittorrent, import, and wanted linking. The manga UI receives canonical series identity plus watcher/calendar state from `/api/series`.
 
-**Tech Stack:** Go 1.25, SQLite via `modernc.org/sqlite`, `goquery` for catalog HTML, `github.com/extrame/xls v0.0.1` for public PRH legacy XLS catalogs, embedded JavaScript UI, existing Go test suite.
+**Tech Stack:** Go 1.25, SQLite via `modernc.org/sqlite`, `goquery` for catalog HTML, `github.com/xuri/excelize/v2 v2.11.0` for public PRH XLSX catalogs, embedded JavaScript UI, existing Go test suite.
 
 ## Global Constraints
 
@@ -238,8 +238,9 @@ go test ./internal/scheduler ./internal/releases -run 'TestParseManga|TestPRH' -
 
 - [ ] **Step 3: Add the minimal parser/provider implementation**
 
-Use the existing `goquery` dependency for catalog HTML discovery. Add only the
-smallest XLS reader needed for PRH’s public catalog format; do not introduce a
+Use the existing `goquery` dependency for catalog HTML discovery. PRH labels
+the public download as XLS, but the response is an XLSX/ZIP payload; use
+Excelize only for the required worksheet/row reads and do not introduce a
 general spreadsheet abstraction.
 
 - [ ] **Step 4: Run parser tests**
