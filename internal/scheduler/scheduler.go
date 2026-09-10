@@ -569,11 +569,7 @@ func (s *Scheduler) startDownload(result models.SearchResult, item models.Wishli
 		case "manga":
 			savePath, category = s.cfg.QBMangaSavePath, s.cfg.QBMangaCategory
 		}
-		torrentTitle := result.Title
-		if torrentTitle == "" {
-			torrentTitle = title
-		}
-		ref, err := s.downloadMgr.StartTorrentDownloadRef(url, torrentTitle, savePath, category, result.InfoHash)
+		ref, err := s.downloadMgr.StartTorrentDownloadRef(url, title, savePath, category, result.InfoHash)
 		if err != nil {
 			var verificationWarning *download.TorrentVerificationWarning
 			if errors.As(err, &verificationWarning) {
