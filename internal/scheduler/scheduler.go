@@ -43,6 +43,7 @@ type Scheduler struct {
 	searchMgr     wantedSearcher
 	downloadMgr   wantedDownloader
 	webhookSender *webhook.Sender
+	mangaWatcher  *MangaWatcher
 
 	// now and sleep are swappable for tests.
 	now   func() time.Time
@@ -116,6 +117,11 @@ func NewScheduler(cfg *config.Config, database *db.DB, searchMgr *search.Manager
 	return s
 }
 
+// SetMangaWatcher attaches the catalog watcher invoked at the start of each pass.
+func (s *Scheduler) SetMangaWatcher(watcher *MangaWatcher) {
+	s.mangaWatcher = watcher
+}
+
 func sleepCtx(ctx context.Context, d time.Duration) bool {
 	if d <= 0 {
 		return true
@@ -180,6 +186,14 @@ func (s *Scheduler) RunCtx(ctx context.Context) RunStats {
 	start := s.now()
 	stats := RunStats{StartedAt: start.Format(time.RFC3339)}
 	slog.Info("scheduler: starting wanted-list scan")
+
+	if s.mangaWatcher != nil {
+		if watchStats, err := s.mangaWatcher.SyncAndQueue(ctx); err != nil {
+			slog.Error("scheduler: manga watcher failed", "error", err)
+		} else if watchStats.Queued > 0 {
+			slog.Info("scheduler: manga watcher queued releases", "queued", watchStats.Queued)
+		}
+	}
 
 	stats.Linked = s.reconcile()
 

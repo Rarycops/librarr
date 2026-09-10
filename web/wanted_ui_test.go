@@ -128,3 +128,20 @@ func TestWantedSearchCarriesAuthor(t *testing.T) {
 		}
 	}
 }
+
+func TestMangaWatcherUIContract(t *testing.T) {
+	js := appJS(t)
+	for _, want := range []string{
+		`data-action="toggleSeriesWatch"`,
+		`aria-pressed="${watchEnabled ? 'true' : 'false'}"`,
+		"toggleSeriesWatch:",
+		"mangaWatchSummary(",
+		"formatMangaNextRelease(",
+		"manga_catalog_stale",
+		"manga_final_release",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("manga watcher UI is missing %q", want)
+		}
+	}
+}

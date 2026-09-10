@@ -16,6 +16,7 @@ import (
 	"github.com/JeremiahM37/librarr/internal/download"
 	"github.com/JeremiahM37/librarr/internal/metadata"
 	"github.com/JeremiahM37/librarr/internal/organize"
+	"github.com/JeremiahM37/librarr/internal/releases"
 	"github.com/JeremiahM37/librarr/internal/scheduler"
 	"github.com/JeremiahM37/librarr/internal/search"
 	"github.com/JeremiahM37/librarr/internal/torznab"
@@ -101,6 +102,10 @@ func NewServer(cfg *config.Config, database *db.DB, searchMgr *search.Manager, d
 	seriesDet := scheduler.NewSeriesDetector(database, searchMgr, ws, cfg.MangaDir)
 	authorMon := scheduler.NewAuthorMonitor(cfg, database, ws)
 	authorMon.SetOpenLibraryURL(cfg.OpenLibraryURL)
+
+	prhProvider := releases.NewPRHProvider(&http.Client{Timeout: 30 * time.Second}, cfg.PRHAPIKey, time.Now)
+	mangaWatcher := scheduler.NewMangaWatcher(database, prhProvider, seriesDet, time.Now)
+	sched.SetMangaWatcher(mangaWatcher)
 
 	s := &Server{
 		cfg:            cfg,
@@ -330,6 +335,7 @@ func (s *Server) registerLibraryRoutes() {
 
 	// Series auto-complete.
 	s.mux.HandleFunc("GET /api/series", s.handleListSeries)
+	s.mux.HandleFunc("PATCH /api/series/{name}/watch", requireAdmin(s.handleSeriesWatch))
 	s.mux.HandleFunc("GET /api/series/{name}/missing", s.handleSeriesMissing)
 	s.mux.HandleFunc("POST /api/series/{name}/search-missing", s.handleSearchMissingSeries)
 

@@ -42,6 +42,15 @@ func (d *DB) AddWishlistItemWithOptions(item models.WishlistItem) (int64, error)
 	if item.Source == "" {
 		item.Source = "manual"
 	}
+	if item.ReleaseKey != "" {
+		existing, err := d.findWishlistByReleaseKeyLocked(item.ReleaseKey)
+		if err != nil {
+			return 0, err
+		}
+		if existing != nil {
+			return 0, fmt.Errorf("wishlist row already exists for release %q", item.ReleaseKey)
+		}
+	}
 	result, err := d.db.Exec(
 		`INSERT INTO wishlist (title, author, media_type, release_key, monitored, quality_profile_id, source) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		item.Title, item.Author, item.MediaType, item.ReleaseKey, boolToInt(item.Monitored), item.QualityProfileID, item.Source,
@@ -104,6 +113,12 @@ func (d *DB) FindWishlistByReleaseKey(releaseKey string) (*models.WishlistItem, 
 	if releaseKey == "" {
 		return nil, nil
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.findWishlistByReleaseKeyLocked(releaseKey)
+}
+
+func (d *DB) findWishlistByReleaseKeyLocked(releaseKey string) (*models.WishlistItem, error) {
 	rows, err := d.db.Query("SELECT "+wishlistColumns+wishlistFrom+" WHERE w.release_key = ? LIMIT 1", releaseKey)
 	if err != nil {
 		return nil, err

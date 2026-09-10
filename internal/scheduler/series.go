@@ -15,19 +15,28 @@ import (
 
 	"github.com/JeremiahM37/librarr/internal/db"
 	"github.com/JeremiahM37/librarr/internal/models"
+	"github.com/JeremiahM37/librarr/internal/releases"
 	"github.com/JeremiahM37/librarr/internal/search"
 	"github.com/JeremiahM37/librarr/internal/webhook"
 )
 
 // SeriesInfo holds detected series data.
 type SeriesInfo struct {
-	ID           int64     `json:"id"`
-	SeriesName   string    `json:"series_name"`
-	KnownTotal   int       `json:"known_total"`
-	OwnedCount   int       `json:"owned_count"`
-	OwnedBooks   []string  `json:"owned_books,omitempty"`
-	MissingBooks []string  `json:"missing_books,omitempty"`
-	LastChecked  time.Time `json:"last_checked"`
+	ID                  int64                `json:"id"`
+	SeriesName          string               `json:"series_name"`
+	KnownTotal          int                  `json:"known_total"`
+	OwnedCount          int                  `json:"owned_count"`
+	OwnedBooks          []string             `json:"owned_books,omitempty"`
+	MissingBooks        []string             `json:"missing_books,omitempty"`
+	LastChecked         time.Time            `json:"last_checked"`
+	Manga               bool                 `json:"manga,omitempty"`
+	WatchEnabled        bool                 `json:"watch_enabled"`
+	ReleaseMode         string               `json:"release_mode"`
+	DetectedReleaseKind string               `json:"detected_release_kind"`
+	HighestOwnedUnit    float64              `json:"highest_owned_unit"`
+	NextRelease         *models.MangaRelease `json:"next_release,omitempty"`
+	CatalogStale        bool                 `json:"catalog_stale"`
+	CatalogError        string               `json:"catalog_error,omitempty"`
 }
 
 // SeriesDetector analyzes the library for series patterns.
@@ -97,8 +106,8 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 		return nil, err
 	}
 
-	// Group items by detected series name.
 	seriesMap := make(map[string]*DetectedSeries)
+	mangaItems := make(map[string][]models.LibraryItem)
 
 	for _, item := range items {
 		if seriesName, volume, ok := d.mangaVolume(item); ok {
@@ -112,6 +121,7 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 			}
 			seriesMap[key].Manga = true
 			seriesMap[key].OwnedBooks[volume] = item.Title
+			mangaItems[key] = append(mangaItems[key], item)
 			continue
 		}
 		for _, pat := range seriesPatterns {
@@ -131,19 +141,26 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 					}
 				}
 				seriesMap[key].OwnedBooks[bookNum] = item.Title
-				break // Use first matching pattern
+				break
 			}
 		}
 	}
 
-	// Build series info with missing book detection.
 	var result []SeriesInfo
-	for _, series := range seriesMap {
+	for key, series := range seriesMap {
+		if series.Manga {
+			info := d.buildMangaSeriesInfo(series, mangaItems[key])
+			info = d.enrichSeriesInfo(info)
+			id, _ := d.db.UpsertSeriesTracking(info.SeriesName, info.KnownTotal, info.OwnedCount)
+			info.ID = id
+			_ = d.db.UpdateSeriesDetection(info.SeriesName, models.ReleaseKind(info.DetectedReleaseKind), info.HighestOwnedUnit)
+			result = append(result, info)
+			continue
+		}
 		if len(series.OwnedBooks) < 2 {
-			continue // Need at least 2 books to detect a series
+			continue
 		}
 
-		// Find max book number.
 		maxNum := 0
 		for num := range series.OwnedBooks {
 			if num > maxNum {
@@ -151,13 +168,10 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 			}
 		}
 
-		// Try to get total from Open Library.
 		total := maxNum
-		if !series.Manga {
-			olTotal := d.getOpenLibrarySeriesTotal(series.Name)
-			if olTotal > total {
-				total = olTotal
-			}
+		olTotal := d.getOpenLibrarySeriesTotal(series.Name)
+		if olTotal > total {
+			total = olTotal
 		}
 
 		var owned []string
@@ -167,8 +181,6 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 			if title, ok := series.OwnedBooks[i]; ok {
 				owned = append(owned, title)
 			} else if omnibus && i%2 == 0 {
-				// Omnibus editions commonly publish odd-numbered books only;
-				// even numbers are component volumes, not missing releases.
 				continue
 			} else {
 				missing = append(missing, fmt.Sprintf("%s Book %d", series.Name, i))
@@ -183,15 +195,134 @@ func (d *SeriesDetector) DetectSeries() ([]SeriesInfo, error) {
 			MissingBooks: missing,
 			LastChecked:  time.Now(),
 		}
-
-		// Save/update in DB.
 		id, _ := d.db.UpsertSeriesTracking(info.SeriesName, info.KnownTotal, info.OwnedCount)
 		info.ID = id
-
 		result = append(result, info)
 	}
 
 	return result, nil
+}
+
+func (d *SeriesDetector) buildMangaSeriesInfo(series *DetectedSeries, items []models.LibraryItem) SeriesInfo {
+	maxNum := 0
+	for num := range series.OwnedBooks {
+		if num > maxNum {
+			maxNum = num
+		}
+	}
+
+	var owned []string
+	var missing []string
+	for i := 1; i <= maxNum; i++ {
+		if title, ok := series.OwnedBooks[i]; ok {
+			owned = append(owned, title)
+		} else {
+			missing = append(missing, fmt.Sprintf("%s Volume %d", series.Name, i))
+		}
+	}
+
+	detected := releases.DetectDominantReleaseKind(items)
+	highest := highestOwnedUnit(items)
+
+	return SeriesInfo{
+		SeriesName:          series.Name,
+		KnownTotal:          maxNum,
+		OwnedCount:          len(series.OwnedBooks),
+		OwnedBooks:          owned,
+		MissingBooks:        missing,
+		LastChecked:         time.Now(),
+		Manga:               true,
+		DetectedReleaseKind: string(detected),
+		HighestOwnedUnit:    highest,
+	}
+}
+
+func highestOwnedUnit(items []models.LibraryItem) float64 {
+	var highest float64
+	for _, item := range items {
+		if kind, seq, ok := releases.ParseMangaReleaseText(filepath.Base(item.FilePath)); ok && kind != models.ReleaseKindUnknown {
+			if seq > highest {
+				highest = seq
+			}
+		}
+	}
+	return highest
+}
+
+func (d *SeriesDetector) enrichSeriesInfo(info SeriesInfo) SeriesInfo {
+	enabled, mode, err := d.db.GetSeriesWatch(info.SeriesName)
+	if err == nil {
+		info.WatchEnabled = enabled
+		if mode != "" {
+			info.ReleaseMode = string(mode)
+		}
+	}
+	if info.ReleaseMode == "" {
+		info.ReleaseMode = string(models.ReleaseModeAuto)
+	}
+
+	tracking, err := d.db.GetSeriesTracking()
+	if err == nil {
+		for _, row := range tracking {
+			if !strings.EqualFold(fmt.Sprint(row["series_name"]), info.SeriesName) {
+				continue
+			}
+			if info.DetectedReleaseKind == "" {
+				info.DetectedReleaseKind = fmt.Sprint(row["detected_release_kind"])
+			}
+			if info.HighestOwnedUnit == 0 {
+				if v, ok := row["highest_owned_unit"].(float64); ok {
+					info.HighestOwnedUnit = v
+				}
+			}
+			info.CatalogError = fmt.Sprint(row["catalog_error"])
+			if info.CatalogError == "<nil>" {
+				info.CatalogError = ""
+			}
+			syncRaw := fmt.Sprint(row["catalog_last_sync"])
+			if enabled {
+				syncAt, parseErr := time.Parse(time.RFC3339, syncRaw)
+				if parseErr != nil || syncAt.IsZero() || time.Since(syncAt) > 7*24*time.Hour {
+					info.CatalogStale = true
+				}
+			}
+			break
+		}
+	}
+
+	releasesList, err := d.db.ListMangaReleases(info.SeriesName, time.Time{})
+	if err == nil {
+		info.NextRelease = pickNextCatalogRelease(releasesList, info)
+	}
+	return info
+}
+
+func pickNextCatalogRelease(catalog []models.MangaRelease, info SeriesInfo) *models.MangaRelease {
+	detected := models.ReleaseKind(info.DetectedReleaseKind)
+	mode := models.ReleaseMode(info.ReleaseMode)
+	if mode == "" {
+		mode = models.ReleaseModeAuto
+	}
+
+	var best *models.MangaRelease
+	for i := range catalog {
+		release := catalog[i]
+		if release.Sequence <= 0 {
+			continue
+		}
+		if release.Sequence <= info.HighestOwnedUnit {
+			continue
+		}
+		if !releases.ReleaseModeAccepts(mode, detected, release.Kind) {
+			continue
+		}
+		if best == nil || release.OnSaleAt.Before(best.OnSaleAt) ||
+			(release.OnSaleAt.Equal(best.OnSaleAt) && release.Sequence < best.Sequence) {
+			copy := release
+			best = &copy
+		}
+	}
+	return best
 }
 
 // GetMissing returns missing books for a named series.

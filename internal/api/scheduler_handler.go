@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/JeremiahM37/librarr/internal/models"
 )
 
 // handleSchedulerStatus returns the scheduler's current state.
@@ -158,6 +160,54 @@ func (s *Server) handleListSeries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"series":  series,
+	})
+}
+
+// handleSeriesWatch toggles automatic catalog watching for a manga series.
+func (s *Server) handleSeriesWatch(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Series name is required",
+		})
+		return
+	}
+
+	var req struct {
+		Enabled     bool   `json:"enabled"`
+		ReleaseMode string `json:"release_mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid JSON",
+		})
+		return
+	}
+
+	mode := models.ReleaseMode(req.ReleaseMode)
+	if mode == "" {
+		mode = models.ReleaseModeAuto
+	}
+	if err := s.db.SetSeriesWatch(name, req.Enabled, mode); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+
+	enabled, storedMode, err := s.db.GetSeriesWatch(name)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": "Failed to read watcher state",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":       true,
+		"series_name":   name,
+		"watch_enabled": enabled,
+		"release_mode":  string(storedMode),
 	})
 }
 

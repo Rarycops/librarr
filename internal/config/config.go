@@ -38,6 +38,9 @@ type Config struct {
 	ProwlarrURL    string
 	ProwlarrAPIKey string
 
+	// Penguin Random House catalog
+	PRHAPIKey string
+
 	// File Organization
 	FileOrgEnabled   bool
 	EbookDir         string
@@ -318,6 +321,7 @@ func buildFromEnv() *Config {
 
 		ProwlarrURL:    getEnv("PROWLARR_URL", ""),
 		ProwlarrAPIKey: getEnv("PROWLARR_API_KEY", ""),
+		PRHAPIKey:      getEnv("PRH_API_KEY", ""),
 
 		FileOrgEnabled:   getEnvBool("FILE_ORG_ENABLED", true),
 		EbookDir:         getEnv("EBOOK_DIR", "/books/ebooks"),

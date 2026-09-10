@@ -1,0 +1,30 @@
+{
+  "results": [
+    {
+      "isbn": "9798888779781",
+      "name": "Witch Hat Atelier 15",
+      "seriesName": "Witch Hat Atelier",
+      "seriesNumber": 15,
+      "author": ["Kamome Shirahama"],
+      "onSaleDate": "2026-12-08",
+      "description": "The next adventure."
+    },
+    {
+      "isbn": "9798888779347",
+      "name": "Vinland Saga 15",
+      "seriesName": "Vinland Saga",
+      "seriesNumber": 15,
+      "author": ["Makoto Yukimura"],
+      "onSaleDate": "2026-10-06",
+      "description": "FINAL VOLUME! The voyage ends."
+    },
+    {
+      "isbn": "not-a-release",
+      "name": "No Date Product",
+      "seriesName": "Witch Hat Atelier",
+      "seriesNumber": 16,
+      "author": ["Kamome Shirahama"],
+      "description": "Date not announced."
+    }
+  ]
+}

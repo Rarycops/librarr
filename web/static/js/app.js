@@ -169,6 +169,20 @@ const I18N = {
     wanted_state_satisfied: 'Satisfied',
     wanted_state_unmonitored: 'Unmonitored',
     wanted_state_owned: 'Owned',
+    manga_watch_on: 'Watching',
+    manga_watch_off: 'Not watching',
+    manga_watch_btn: 'Watch',
+    manga_release_mode_auto: 'Auto',
+    manga_release_mode_volume: 'Volume',
+    manga_release_mode_omnibus: 'Omnibus',
+    manga_release_mode_chapter: 'Chapter',
+    manga_release_mode_any: 'Any',
+    manga_next_release: 'Next release: {title} · {date}',
+    manga_final_release: 'Final release',
+    manga_catalog_stale: 'Catalog stale',
+    manga_catalog_error: 'Catalog error',
+    manga_watch_updated: 'Watcher updated for {series}',
+    manga_watch_failed: 'Failed to update watcher',
     wanted_search_all: 'Search all now',
     wanted_search_now: 'Search now',
     wanted_explain: 'Why?',
@@ -412,6 +426,20 @@ const I18N = {
     wanted_state_satisfied: 'Готово',
     wanted_state_unmonitored: 'Не отслеживается',
     wanted_state_owned: 'В библиотеке',
+    manga_watch_on: 'Слежение',
+    manga_watch_off: 'Без слежения',
+    manga_watch_btn: 'Следить',
+    manga_release_mode_auto: 'Авто',
+    manga_release_mode_volume: 'Том',
+    manga_release_mode_omnibus: 'Омнибус',
+    manga_release_mode_chapter: 'Глава',
+    manga_release_mode_any: 'Любой',
+    manga_next_release: 'Следующий релиз: {title} · {date}',
+    manga_final_release: 'Финальный том',
+    manga_catalog_stale: 'Каталог устарел',
+    manga_catalog_error: 'Ошибка каталога',
+    manga_watch_updated: 'Слежение обновлено: {series}',
+    manga_watch_failed: 'Не удалось обновить слежение',
     wanted_search_all: 'Искать всё сейчас',
     wanted_search_now: 'Искать',
     wanted_monitored: 'Отслеживать',
@@ -1965,6 +1993,80 @@ function mangaVolumeLabel(item) {
   return (path.split(/[\\/]/).pop() || item.title || 'Volume').replace(/\.[^.]+$/, '');
 }
 
+function mangaReleaseModeLabel(mode) {
+  const key = `manga_release_mode_${String(mode || 'auto').toLowerCase()}`;
+  const label = t(key);
+  return label === key ? String(mode || 'auto') : label;
+}
+
+function formatMangaNextRelease(tracked) {
+  const release = tracked?.next_release;
+  if (!release?.title) return '';
+  const date = release.on_sale_at ? new Date(release.on_sale_at).toLocaleDateString() : '';
+  return t('manga_next_release', { title: release.title, date });
+}
+
+function mangaWatchSummary(tracked) {
+  if (!tracked) return '';
+  const parts = [];
+  parts.push(tracked.watch_enabled ? t('manga_watch_on') : t('manga_watch_off'));
+  parts.push(mangaReleaseModeLabel(tracked.release_mode || 'auto'));
+  if (tracked.detected_release_kind) {
+    parts.push(mangaReleaseModeLabel(tracked.detected_release_kind));
+  }
+  const next = formatMangaNextRelease(tracked);
+  if (next) parts.push(next);
+  if (tracked.next_release?.final) parts.push(t('manga_final_release'));
+  if (tracked.catalog_stale) parts.push(t('manga_catalog_stale'));
+  if (tracked.catalog_error) parts.push(`${t('manga_catalog_error')}: ${tracked.catalog_error}`);
+  return parts.join(' · ');
+}
+
+async function toggleSeriesWatch(seriesName, enabled, releaseMode) {
+  const key = String(seriesName || '').toLowerCase();
+  const previous = state.seriesTracking.find((item) => (
+    String(item.series_name || '').toLowerCase() === key
+  ));
+  const priorEnabled = previous?.watch_enabled;
+  const priorMode = previous?.release_mode || 'auto';
+  if (previous) {
+    previous.watch_enabled = enabled;
+    previous.release_mode = releaseMode || priorMode;
+  }
+  loadLibrary();
+  try {
+    const resp = await apiJson(`/api/series/${encodeURIComponent(seriesName)}/watch`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        enabled,
+        release_mode: releaseMode || priorMode,
+      }),
+    });
+    const idx = state.seriesTracking.findIndex((item) => (
+      String(item.series_name || '').toLowerCase() === key
+    ));
+    const row = {
+      series_name: seriesName,
+      watch_enabled: resp.watch_enabled,
+      release_mode: resp.release_mode,
+      ...(previous || {}),
+    };
+    if (idx >= 0) state.seriesTracking[idx] = { ...state.seriesTracking[idx], ...row };
+    else state.seriesTracking.push(row);
+    loadLibrary();
+    showToast(t('manga_watch_updated', { series: seriesName }), 'success');
+  } catch (err) {
+    if (previous) {
+      previous.watch_enabled = priorEnabled;
+      previous.release_mode = priorMode;
+    }
+    loadLibrary();
+    if (err.message !== 'Unauthorized') {
+      showToast(t('manga_watch_failed'), 'error');
+    }
+  }
+}
+
 function renderMangaSeriesGroups(items) {
   const groups = new Map();
   for (const item of items) {
@@ -1993,6 +2095,10 @@ function renderMangaSeriesGroups(items) {
       owned: 'bg-slate-700 text-slate-300',
     }[stateKey] || 'bg-slate-700 text-slate-300';
 
+    const watchSummary = mangaWatchSummary(tracked);
+    const watchEnabled = !!tracked?.watch_enabled;
+    const watchMode = tracked?.release_mode || 'auto';
+
     return `
       <article class="rounded-xl border border-slate-800 bg-slate-900/70 overflow-hidden">
         <div class="flex items-center gap-4 p-4">
@@ -2001,10 +2107,17 @@ function renderMangaSeriesGroups(items) {
               data-manga-cover data-ph-title="${escapeHtml(title)}" data-ph-idx="${index}">
             <div class="hidden w-full h-full">${fallback}</div>
           </div>
-          <div class="min-w-0">
+          <div class="min-w-0 flex-1">
             <h3 class="text-lg font-semibold text-white line-clamp-2">${escapeHtml(title)}</h3>
             <p class="text-sm text-slate-400">${volumes.length} volume${volumes.length === 1 ? '' : 's'}</p>
             <span class="inline-block mt-2 rounded-full px-2 py-0.5 text-xs ${stateStyle}">${escapeHtml(stateLabel)}</span>
+            ${watchSummary ? `<p class="mt-2 text-xs text-slate-400 line-clamp-3">${escapeHtml(watchSummary)}</p>` : ''}
+            <button type="button" aria-pressed="${watchEnabled ? 'true' : 'false'}"
+              data-action="toggleSeriesWatch" data-series-title="${escapeHtml(title)}"
+              data-watch-enabled="${watchEnabled ? '0' : '1'}" data-release-mode="${escapeHtml(watchMode)}"
+              class="mt-3 rounded-lg px-3 py-1.5 text-xs ${watchEnabled ? 'bg-emerald-500/20 text-emerald-200' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+              ${escapeHtml(watchEnabled ? t('manga_watch_on') : t('manga_watch_btn'))}
+            </button>
           </div>
         </div>
         <button data-action="openMangaSeries" data-series-title="${escapeHtml(title)}"
@@ -2025,6 +2138,7 @@ function openMangaSeries(title) {
   ));
   const missing = tracked?.missing_books || [];
   const stateLabel = wantedStateLabel(missing.length ? 'missing' : (wanted?.state || 'owned'));
+  const watchSummary = mangaWatchSummary(tracked);
   let modal = document.getElementById('manga-series-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -2052,10 +2166,18 @@ function openMangaSeries(title) {
   modal.innerHTML = `<div class="w-full max-w-2xl max-h-[85vh] overflow-auto rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
     <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
       <div><h2 class="text-xl font-semibold text-white">${escapeHtml(title)}</h2>
-      <p class="text-sm text-slate-400">${volumes.length} volumes · ${escapeHtml(stateLabel)}</p></div>
+      <p class="text-sm text-slate-400">${volumes.length} volumes · ${escapeHtml(stateLabel)}</p>
+      ${watchSummary ? `<p class="mt-1 text-xs text-slate-500">${escapeHtml(watchSummary)}</p>` : ''}</div>
       <button data-action="closeMangaSeries" class="text-2xl text-slate-400 hover:text-white" aria-label="Close">×</button>
     </div>
-    <div class="p-5">${missingHtml}<div class="mt-4 grid gap-2 sm:grid-cols-2">${rows}</div></div>
+    <div class="p-5">
+      <button type="button" aria-pressed="${tracked?.watch_enabled ? 'true' : 'false'}"
+        data-action="toggleSeriesWatch" data-series-title="${escapeHtml(title)}"
+        data-watch-enabled="${tracked?.watch_enabled ? '0' : '1'}" data-release-mode="${escapeHtml(tracked?.release_mode || 'auto')}"
+        class="rounded-lg px-3 py-1.5 text-xs ${tracked?.watch_enabled ? 'bg-emerald-500/20 text-emerald-200' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+        ${escapeHtml(tracked?.watch_enabled ? t('manga_watch_on') : t('manga_watch_btn'))}
+      </button>
+      ${missingHtml}<div class="mt-4 grid gap-2 sm:grid-cols-2">${rows}</div></div>
   </div>`;
   modal.classList.remove('hidden');
   modal.classList.add('flex');
@@ -3556,6 +3678,11 @@ const CLICK_ACTIONS = {
   retryDownload: el => retryDownload(el.dataset.jobId),
   deleteLibraryItem: el => deleteLibraryItem(el.dataset.id, el.dataset.type, el.dataset.title),
   openMangaSeries: el => openMangaSeries(el.dataset.seriesTitle),
+  toggleSeriesWatch: el => toggleSeriesWatch(
+    el.dataset.seriesTitle,
+    el.dataset.watchEnabled === '1',
+    el.dataset.releaseMode,
+  ),
   closeMangaSeries: () => closeMangaSeries(),
   requestMangaMissing: el => requestMangaMissing(el.dataset.seriesTitle),
   goLibraryPage: el => goLibraryPage(+el.dataset.page),

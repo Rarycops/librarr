@@ -60,6 +60,20 @@ func TestMangaReleaseUpsertAndList(t *testing.T) {
 	}
 }
 
+func TestWishlistReleaseKeyDuplicateRejected(t *testing.T) {
+	d := newTestDB(t)
+	item := models.WishlistItem{
+		Title: "Witch Hat Atelier 15", MediaType: "manga", Monitored: true,
+		ReleaseKey: "prh:9798888779781",
+	}
+	if _, err := d.AddWishlistItemWithOptions(item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.AddWishlistItemWithOptions(item); err == nil {
+		t.Fatal("expected duplicate release key to be rejected")
+	}
+}
+
 func TestWishlistReleaseKeyRoundTrip(t *testing.T) {
 	d := newTestDB(t)
 	id, err := d.AddWishlistItemWithOptions(models.WishlistItem{

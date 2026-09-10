@@ -73,6 +73,70 @@ func (d *DB) GetSeriesWatch(seriesName string) (bool, models.ReleaseMode, error)
 	return enabled != 0, models.ReleaseMode(mode), nil
 }
 
+// UpdateSeriesDetection stores the latest owned-unit scan for a series.
+func (d *DB) UpdateSeriesDetection(seriesName string, kind models.ReleaseKind, highestOwned float64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.db.Exec(
+		`INSERT INTO series_tracking (series_name, detected_release_kind, highest_owned_unit, last_checked)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(series_name) DO UPDATE SET
+			detected_release_kind = ?, highest_owned_unit = ?, last_checked = ?`,
+		seriesName, kind, highestOwned, float64(time.Now().Unix()),
+		kind, highestOwned, float64(time.Now().Unix()),
+	)
+	return err
+}
+
+// SetSeriesCatalogSync records the last catalog provider result for a series.
+func (d *DB) SetSeriesCatalogSync(seriesName string, syncedAt time.Time, errMsg string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.db.Exec(
+		`INSERT INTO series_tracking (series_name, catalog_last_sync, catalog_error, last_checked)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(series_name) DO UPDATE SET catalog_last_sync = ?, catalog_error = ?`,
+		seriesName, syncedAt.Unix(), errMsg, float64(time.Now().Unix()),
+		syncedAt.Unix(), errMsg,
+	)
+	return err
+}
+
+// GetSeriesDetection returns the latest owned-unit scan for one series.
+func (d *DB) GetSeriesDetection(seriesName string) (models.ReleaseKind, float64, error) {
+	var kind string
+	var highest float64
+	err := d.db.QueryRow(
+		`SELECT detected_release_kind, highest_owned_unit FROM series_tracking WHERE series_name = ?`,
+		seriesName,
+	).Scan(&kind, &highest)
+	if err == sql.ErrNoRows {
+		return models.ReleaseKindUnknown, 0, nil
+	}
+	if err != nil {
+		return models.ReleaseKindUnknown, 0, err
+	}
+	return models.ReleaseKind(kind), highest, nil
+}
+
+// ListWatchEnabledSeries returns tracked series with active watchers.
+func (d *DB) ListWatchEnabledSeries() ([]string, error) {
+	rows, err := d.db.Query(`SELECT series_name FROM series_tracking WHERE watch_enabled = 1 ORDER BY series_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // GetSeriesTracking returns all tracked series.
 func (d *DB) GetSeriesTracking() ([]map[string]interface{}, error) {
 	rows, err := d.db.Query(`SELECT id, series_name, known_total, owned_count,
