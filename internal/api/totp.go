@@ -42,13 +42,19 @@ func validateTOTPCode(secret, code string) bool {
 
 // generateBackupCodes generates n random 8-digit backup codes.
 func generateBackupCodes(n int) ([]string, error) {
-	codes := make([]string, n)
-	for i := 0; i < n; i++ {
+	codes := make([]string, 0, n)
+	seen := make(map[string]struct{}, n)
+	for len(codes) < n {
 		num, err := rand.Int(rand.Reader, big.NewInt(100000000))
 		if err != nil {
 			return nil, err
 		}
-		codes[i] = fmt.Sprintf("%08d", num.Int64())
+		code := fmt.Sprintf("%08d", num.Int64())
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
 	}
 	return codes, nil
 }
