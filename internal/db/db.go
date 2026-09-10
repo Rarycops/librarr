@@ -104,6 +104,7 @@ func (d *DB) migrate() error {
 			title TEXT NOT NULL DEFAULT '',
 			author TEXT NOT NULL DEFAULT '',
 			media_type TEXT NOT NULL DEFAULT 'ebook',
+			release_key TEXT NOT NULL DEFAULT '',
 			added_at REAL NOT NULL DEFAULT (strftime('%s','now'))
 		)`,
 		`CREATE TABLE IF NOT EXISTS nzb_jobs (
@@ -225,8 +226,30 @@ func (d *DB) migrate() error {
 		series_name TEXT NOT NULL UNIQUE,
 		known_total INTEGER NOT NULL DEFAULT 0,
 		owned_count INTEGER NOT NULL DEFAULT 0,
+		watch_enabled INTEGER NOT NULL DEFAULT 0,
+		release_mode TEXT NOT NULL DEFAULT 'auto',
+		detected_release_kind TEXT NOT NULL DEFAULT '',
+		highest_owned_unit REAL NOT NULL DEFAULT 0,
+		catalog_last_sync REAL NOT NULL DEFAULT 0,
+		catalog_error TEXT NOT NULL DEFAULT '',
 		last_checked REAL NOT NULL DEFAULT (strftime('%s','now'))
 	)`)
+	migrations = append(migrations, `CREATE TABLE IF NOT EXISTS manga_releases (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		provider TEXT NOT NULL,
+		provider_key TEXT NOT NULL,
+		series_name TEXT NOT NULL,
+		author TEXT NOT NULL DEFAULT '',
+		title TEXT NOT NULL,
+		kind TEXT NOT NULL DEFAULT 'unknown',
+		sequence REAL NOT NULL DEFAULT 0,
+		on_sale_at REAL NOT NULL,
+		final_release INTEGER NOT NULL DEFAULT 0,
+		source_url TEXT NOT NULL DEFAULT '',
+		fetched_at REAL NOT NULL
+	)`)
+	migrations = append(migrations, `CREATE UNIQUE INDEX IF NOT EXISTS idx_manga_releases_provider_key ON manga_releases(provider, provider_key)`)
+	migrations = append(migrations, `CREATE INDEX IF NOT EXISTS idx_manga_releases_series_date ON manga_releases(series_name, on_sale_at)`)
 
 	// Quality profiles table.
 	migrations = append(migrations, `CREATE TABLE IF NOT EXISTS quality_profiles (
@@ -327,6 +350,7 @@ func (d *DB) migrate() error {
 		`ALTER TABLE wishlist ADD COLUMN last_searched REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE wishlist ADD COLUMN last_result TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE wishlist ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`,
+		`ALTER TABLE wishlist ADD COLUMN release_key TEXT NOT NULL DEFAULT ''`,
 		// A grab links back to the wanted row it satisfies.
 		`ALTER TABLE download_jobs ADD COLUMN wanted_id INTEGER NOT NULL DEFAULT 0`,
 		// Profiles are per media type; built-in ones cannot be deleted.
@@ -334,6 +358,12 @@ func (d *DB) migrate() error {
 		`ALTER TABLE quality_profiles ADD COLUMN builtin INTEGER NOT NULL DEFAULT 0`,
 		// Author monitoring can add new works to the wanted list.
 		`ALTER TABLE monitored_authors ADD COLUMN auto_add INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE series_tracking ADD COLUMN watch_enabled INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE series_tracking ADD COLUMN release_mode TEXT NOT NULL DEFAULT 'auto'`,
+		`ALTER TABLE series_tracking ADD COLUMN detected_release_kind TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE series_tracking ADD COLUMN highest_owned_unit REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE series_tracking ADD COLUMN catalog_last_sync REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE series_tracking ADD COLUMN catalog_error TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range addColumns {
 		if _, err := d.db.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
@@ -357,6 +387,7 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_wishlist_active_job ON wishlist(active_job_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_wishlist_library_item ON wishlist(library_item_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_wishlist_release_key ON wishlist(release_key)`,
 	}
 	for _, m := range postMigrations {
 		if _, err := d.db.Exec(m); err != nil {

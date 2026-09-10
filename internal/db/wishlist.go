@@ -15,7 +15,7 @@ import (
 // later. The columns are additive on top of the original (title, author,
 // media_type) so exports, imports and older clients keep working.
 
-const wishlistColumns = `w.id, w.title, w.author, w.media_type, w.added_at,
+const wishlistColumns = `w.id, w.title, w.author, w.media_type, w.release_key, w.added_at,
 	w.monitored, w.quality_profile_id, w.library_item_id, w.active_job_id,
 	w.last_searched, w.last_result, w.source,
 	COALESCE(li.file_format, ''), COALESCE(li.file_path, '')`
@@ -43,8 +43,8 @@ func (d *DB) AddWishlistItemWithOptions(item models.WishlistItem) (int64, error)
 		item.Source = "manual"
 	}
 	result, err := d.db.Exec(
-		`INSERT INTO wishlist (title, author, media_type, monitored, quality_profile_id, source) VALUES (?, ?, ?, ?, ?, ?)`,
-		item.Title, item.Author, item.MediaType, boolToInt(item.Monitored), item.QualityProfileID, item.Source,
+		`INSERT INTO wishlist (title, author, media_type, release_key, monitored, quality_profile_id, source) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		item.Title, item.Author, item.MediaType, item.ReleaseKey, boolToInt(item.Monitored), item.QualityProfileID, item.Source,
 	)
 	if err != nil {
 		return 0, err
@@ -98,13 +98,31 @@ func (d *DB) FindWishlistByActiveJob(jobRef string) (*models.WishlistItem, error
 	return &items[0], nil
 }
 
+// FindWishlistByReleaseKey returns the watcher-created row for a catalog
+// release, or nil when the release has not been queued.
+func (d *DB) FindWishlistByReleaseKey(releaseKey string) (*models.WishlistItem, error) {
+	if releaseKey == "" {
+		return nil, nil
+	}
+	rows, err := d.db.Query("SELECT "+wishlistColumns+wishlistFrom+" WHERE w.release_key = ? LIMIT 1", releaseKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items, err := scanWishlistItems(rows)
+	if err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return &items[0], nil
+}
+
 func scanWishlistItems(rows *sql.Rows) ([]models.WishlistItem, error) {
 	var items []models.WishlistItem
 	for rows.Next() {
 		var item models.WishlistItem
 		var added, searched float64
 		var monitored int
-		if err := rows.Scan(&item.ID, &item.Title, &item.Author, &item.MediaType, &added,
+		if err := rows.Scan(&item.ID, &item.Title, &item.Author, &item.MediaType, &item.ReleaseKey, &added,
 			&monitored, &item.QualityProfileID, &item.LibraryItemID, &item.ActiveJobID,
 			&searched, &item.LastResult, &item.Source,
 			&item.CurrentFormat, &item.CurrentPath); err != nil {
