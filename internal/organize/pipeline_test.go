@@ -56,6 +56,8 @@ func TestCleanSeriesTitle(t *testing.T) {
 		{"strips volume with dot", "One Piece Vol.5", "One Piece"},
 		{"strips paren tags", "Title (Digital)", "Title"},
 		{"strips range", "Series 1-50", "Series"},
+		{"strips parenthesized release range", "Delicious in Dungeon (2017-2024) (Digital) (1r0n)", "Delicious in Dungeon"},
+		{"strips parenthesized release year", "Look Back (2022) (Digital) (1r0n)", "Look Back"},
 		{"empty becomes Unknown", "", "Unknown"},
 		{"complex cleanup", "[Group] Manga Series Vol 1 (Digital).cbz", "Manga Series"},
 		{"strips trailing dash", "Title -", "Title"},

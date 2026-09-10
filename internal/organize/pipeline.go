@@ -241,6 +241,7 @@ var (
 	whitespaceRe = regexp.MustCompile(`\s+`)
 	bracketRe    = regexp.MustCompile(`\[[^\]]*\]`)
 	parenTagsRe  = regexp.MustCompile(`\((?i:Digital|f|c2c|Viz|Complete)\)`)
+	yearRe       = regexp.MustCompile(`(?i)\s*\((?:19|20)\d{2}(?:\s*-\s*(?:19|20)?\d{2})?\).*$`)
 	volumeRe     = regexp.MustCompile(`(?i)\s*(?:Vol\.?|Volume|v)\s*\d+.*$`)
 	rangeRe      = regexp.MustCompile(`\s*\d+-\d+.*$`)
 )
@@ -263,6 +264,7 @@ func cleanSeriesTitle(name string) string {
 	// Strip file extensions.
 	name = regexp.MustCompile(`(?i)\.(epub|cbz|cbr|pdf|zip|mobi|azw3)$`).ReplaceAllString(name, "")
 	name = bracketRe.ReplaceAllString(name, "")
+	name = yearRe.ReplaceAllString(name, "")
 	name = parenTagsRe.ReplaceAllString(name, "")
 	name = volumeRe.ReplaceAllString(name, "")
 	name = rangeRe.ReplaceAllString(name, "")
