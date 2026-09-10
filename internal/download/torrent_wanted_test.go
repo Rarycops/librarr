@@ -1,6 +1,7 @@
 package download
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/JeremiahM37/librarr/internal/config"
@@ -17,6 +18,12 @@ func (wantedTorrentClient) DeleteTorrent(string, bool) error              { retu
 func (wantedTorrentClient) Diagnose() map[string]interface{}              { return nil }
 func (wantedTorrentClient) Name() string                                  { return "test" }
 
+type duplicateWantedTorrentClient struct{ wantedTorrentClient }
+
+func (duplicateWantedTorrentClient) AddTorrent(string, string, string, string, string) error {
+	return fmt.Errorf("add torrent HTTP 409: Conflict")
+}
+
 func TestStartTorrentDownloadRefFindsAcceptedHash(t *testing.T) {
 	manager := &Manager{
 		cfg:     &config.Config{},
@@ -29,6 +36,27 @@ func TestStartTorrentDownloadRefFindsAcceptedHash(t *testing.T) {
 		"/manga-incoming",
 		"manga",
 		"stale-search-hash",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref != "torrent:abc123" {
+		t.Fatalf("wanted ref = %q, want torrent:abc123", ref)
+	}
+}
+
+func TestStartTorrentDownloadRefAcceptsExistingDuplicate(t *testing.T) {
+	manager := &Manager{
+		cfg:     &config.Config{},
+		torrent: duplicateWantedTorrentClient{},
+	}
+
+	ref, err := manager.StartTorrentDownloadRef(
+		"https://example.org/look-back.torrent",
+		"Look Back",
+		"/manga-incoming",
+		"manga",
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)

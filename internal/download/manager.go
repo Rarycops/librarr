@@ -127,32 +127,35 @@ func (m *Manager) StartTorrentDownloadRef(torrentURL, title, savePath, category,
 	err := m.torrent.AddTorrent(torrentURL, title, savePath, category, expectedInfoHash)
 	var verificationWarning *TorrentVerificationWarning
 	if err != nil && !errors.As(err, &verificationWarning) {
+		if ref := m.findTorrentRef(torrentURL, title, category, expectedInfoHash); ref != "" &&
+			strings.Contains(err.Error(), "HTTP 409") {
+			return ref, nil
+		}
 		return "", err
 	}
 
+	return m.findTorrentRef(torrentURL, title, category, expectedInfoHash), err
+}
+
+func (m *Manager) findTorrentRef(torrentURL, title, category, expectedInfoHash string) string {
 	expectedHash := firstNonEmptyHash(expectedInfoHash, infoHashFromMagnet(torrentURL))
-	infoHash := ""
 	torrents, listErr := m.torrent.GetTorrents(category)
 	if listErr == nil {
 		for _, torrent := range torrents {
 			if firstNonEmptyHash(torrent.Hash) == expectedHash {
-				infoHash = torrent.Hash
-				break
+				return TorrentWantedRef(torrent.Hash)
 			}
 		}
-		if infoHash == "" {
-			for _, torrent := range torrents {
-				if torrentTitleMatches(title, torrent.Name) {
-					infoHash = torrent.Hash
-					break
-				}
+		for _, torrent := range torrents {
+			if torrentTitleMatches(title, torrent.Name) {
+				return TorrentWantedRef(torrent.Hash)
 			}
 		}
 	}
-	if infoHash == "" && isMagnetURL(torrentURL) {
-		infoHash = expectedHash
+	if isMagnetURL(torrentURL) {
+		return TorrentWantedRef(expectedHash)
 	}
-	return TorrentWantedRef(infoHash), err
+	return ""
 }
 
 func torrentTitleMatches(wanted, torrent string) bool {
