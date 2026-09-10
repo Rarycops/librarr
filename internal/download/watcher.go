@@ -533,17 +533,29 @@ func (w *Watcher) importManga(t TorrentInfo, savePath, source string) (bool, err
 			inLibrary = false
 		}
 
-		inserted, err := w.recordTorrentItem(source, t, "manga", mf, destPath, t.Name, "", t.Name, "", fileFormat(destPath), t.TotalSize)
+		seriesTitle := mangaLibraryTitle(destPath, t.Name)
+		inserted, err := w.recordTorrentItem(source, t, "manga", mf, destPath, seriesTitle, "", seriesTitle, "", fileFormat(destPath), t.TotalSize)
 		if err != nil {
 			return false, err
 		}
 
 		if inserted && w.targets != nil {
-			w.targets.ImportManga(destPath, t.Name)
+			w.targets.ImportManga(destPath, seriesTitle)
 		}
 	}
 
 	return inLibrary, nil
+}
+
+func mangaLibraryTitle(path, fallback string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fallback
+	}
+	if info.IsDir() {
+		return filepath.Base(path)
+	}
+	return filepath.Base(filepath.Dir(path))
 }
 
 func (w *Watcher) recordTorrentItem(source string, t TorrentInfo, mediaType, sourcePath, destinationPath, title, author, metadataTitle, metadataAuthor, format string, fileSize int64) (bool, error) {

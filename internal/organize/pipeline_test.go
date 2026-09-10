@@ -73,6 +73,29 @@ func TestCleanSeriesTitle(t *testing.T) {
 	}
 }
 
+func TestCleanMangaFilename(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    "Delicious in Dungeon v14 (2024) (Digital) (1r0n).cbz",
+			expected: "Delicious in Dungeon v14.cbz",
+		},
+		{
+			input:    "Pluto (2004) Volume 008.cbz",
+			expected: "Pluto Volume 008.cbz",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := cleanMangaFilename(tt.input); got != tt.expected {
+				t.Fatalf("cleanMangaFilename(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestOrganizer_DisabledDoesNothing(t *testing.T) {
 	cfg := &config.Config{FileOrgEnabled: false}
 	o := NewOrganizer(cfg)

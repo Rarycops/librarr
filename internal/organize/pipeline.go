@@ -194,7 +194,7 @@ func (o *Organizer) OrganizeManga(filePath, seriesTitle string) (string, error) 
 		}
 		for _, entry := range entries {
 			src := filepath.Join(filePath, entry.Name())
-			dst := filepath.Join(destDir, entry.Name())
+			dst := filepath.Join(destDir, cleanMangaFilename(src))
 			_ = o.placeFile(src, dst)
 		}
 		// Only a move consumes the download; hardlink/copy must leave the
@@ -204,7 +204,7 @@ func (o *Organizer) OrganizeManga(filePath, seriesTitle string) (string, error) 
 		}
 		resultPath = destDir
 	} else {
-		destPath := filepath.Join(destDir, filepath.Base(filePath))
+		destPath := filepath.Join(destDir, cleanMangaFilename(filePath))
 		if err := o.placeFile(filePath, destPath); err != nil {
 			return filePath, err
 		}
@@ -242,6 +242,8 @@ var (
 	bracketRe    = regexp.MustCompile(`\[[^\]]*\]`)
 	parenTagsRe  = regexp.MustCompile(`\((?i:Digital|f|c2c|Viz|Complete)\)`)
 	yearRe       = regexp.MustCompile(`(?i)\s*\((?:19|20)\d{2}(?:\s*-\s*(?:19|20)?\d{2})?\).*$`)
+	yearOnlyRe   = regexp.MustCompile(`(?i)\s*\((?:19|20)\d{2}(?:\s*-\s*(?:19|20)?\d{2})?\)`)
+	releaseTagRe = regexp.MustCompile(`(?i)\s+\([a-z0-9][a-z0-9_-]{2,}\)$`)
 	volumeRe     = regexp.MustCompile(`(?i)\s*(?:Vol\.?|Volume|v)\s*\d+.*$`)
 	rangeRe      = regexp.MustCompile(`\s*\d+-\d+.*$`)
 )
@@ -276,6 +278,18 @@ func cleanSeriesTitle(name string) string {
 	// separator/dot stripping every other organizer uses. Titles come from
 	// manual-import requests and torrent names, both attacker-influenced.
 	return sanitizePath(name, 120)
+}
+
+func cleanMangaFilename(filePath string) string {
+	ext := filepath.Ext(filePath)
+	name := strings.TrimSuffix(filepath.Base(filePath), ext)
+	name = bracketRe.ReplaceAllString(name, "")
+	name = yearOnlyRe.ReplaceAllString(name, "")
+	name = parenTagsRe.ReplaceAllString(name, "")
+	name = releaseTagRe.ReplaceAllString(name, "")
+	name = whitespaceRe.ReplaceAllString(name, " ")
+	name = strings.TrimSpace(name)
+	return sanitizePath(name, 180) + ext
 }
 
 // joinUnder joins name onto root and verifies the result stays inside root, so
