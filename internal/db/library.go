@@ -185,6 +185,11 @@ func (d *DB) LibraryPaths(mediaType string) (map[string]struct{}, error) {
 	return paths, nil
 }
 
+// HashLibraryFile returns the SHA-256 hex digest of a regular file, or "".
+func HashLibraryFile(filePath string) string {
+	return hashLibraryFile(filePath)
+}
+
 func hashLibraryFile(filePath string) string {
 	filePath = filepath.Clean(strings.TrimSpace(filePath))
 	if filePath == "" || filePath == "." || strings.Contains(filePath, "..") {
@@ -332,6 +337,57 @@ func effectiveLibraryFormat(fileFormat, filePath string) string {
 		return format
 	}
 	return strings.TrimPrefix(strings.ToLower(filepath.Ext(filePath)), ".")
+}
+
+// FindExistingByContentHash returns a library item whose stored content matches
+// the given hash and media type. Format is compared when both sides have one.
+func (d *DB) FindExistingByContentHash(mediaType, fileFormat, contentHash string) (*models.LibraryItem, error) {
+	contentHash = strings.ToLower(strings.TrimSpace(contentHash))
+	mediaType = strings.TrimSpace(mediaType)
+	if contentHash == "" || mediaType == "" {
+		return nil, nil
+	}
+	candidateFormat := effectiveLibraryFormat(fileFormat, "")
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	rows, err := d.db.Query(
+		`SELECT id, file_path, content_hash, file_format, media_type FROM library_items WHERE content_hash = ? AND media_type = ?`,
+		contentHash, mediaType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var filePath, existingHash, storedFormat, storedMediaType string
+		if err := rows.Scan(&id, &filePath, &existingHash, &storedFormat, &storedMediaType); err != nil {
+			return nil, err
+		}
+		if storedMediaType != mediaType {
+			continue
+		}
+		if existingHash == "" {
+			existingHash = hashLibraryFile(filePath)
+		}
+		if existingHash != contentHash {
+			continue
+		}
+		if candidateFormat != "" && effectiveLibraryFormat(storedFormat, filePath) != candidateFormat {
+			continue
+		}
+		return &models.LibraryItem{
+			ID:          id,
+			FilePath:    filePath,
+			ContentHash: existingHash,
+			FileFormat:  storedFormat,
+			MediaType:   storedMediaType,
+		}, nil
+	}
+	return nil, rows.Err()
 }
 
 // HasSourceID checks if a source_id already exists.

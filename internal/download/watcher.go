@@ -444,7 +444,9 @@ func (w *Watcher) importEbook(t TorrentInfo, savePath, source string) (bool, err
 		metadata := organize.ExtractEbookMetadata(bf)
 		title := firstNonEmpty(metadata.Title, t.Name)
 		author := metadata.Author
-		destPath, err := organizer.OrganizeEbook(bf, title, author)
+		destPath, err := w.resolveLibraryPath(organizer, "ebook", bf, func() (string, error) {
+			return organizer.OrganizeEbook(bf, title, author)
+		})
 		if err != nil {
 			slog.Warn("organize ebook failed", "file", bf, "error", err)
 			destPath = bf
@@ -496,7 +498,9 @@ func (w *Watcher) importAudiobook(t TorrentInfo, savePath, source string) (bool,
 		author = "Unknown"
 	}
 
-	destPath, err := w.organizerFor(source).OrganizeAudiobook(savePath, title, author)
+	destPath, err := w.resolveLibraryPath(w.organizerFor(source), "audiobook", savePath, func() (string, error) {
+		return w.organizerFor(source).OrganizeAudiobook(savePath, title, author)
+	})
 	if err != nil {
 		return false, fmt.Errorf("organize audiobook %q: %w", savePath, err)
 	}
@@ -524,7 +528,9 @@ func (w *Watcher) importManga(t TorrentInfo, savePath, source string) (bool, err
 	organizer := w.organizerFor(source)
 	inLibrary := true
 	for _, mf := range mangaFiles {
-		destPath, err := organizer.OrganizeManga(mf, t.Name)
+		destPath, err := w.resolveLibraryPath(organizer, "manga", mf, func() (string, error) {
+			return organizer.OrganizeManga(mf, t.Name)
+		})
 		if err != nil {
 			slog.Warn("organize manga failed", "file", mf, "error", err)
 			destPath = mf
@@ -545,6 +551,37 @@ func (w *Watcher) importManga(t TorrentInfo, savePath, source string) (bool, err
 	}
 
 	return inLibrary, nil
+}
+
+// resolveLibraryPath returns an existing library path when sourcePath's content
+// is already recorded, otherwise runs organize to place the file.
+func (w *Watcher) resolveLibraryPath(_ *organize.Organizer, mediaType, sourcePath string, organize func() (string, error)) (string, error) {
+	if existing, ok := w.existingLibraryPathForSource(mediaType, sourcePath); ok {
+		return existing, nil
+	}
+	return organize()
+}
+
+func (w *Watcher) existingLibraryPathForSource(mediaType, sourcePath string) (string, bool) {
+	contentHash := db.HashLibraryFile(sourcePath)
+	if contentHash == "" {
+		return "", false
+	}
+	existing, err := w.db.FindExistingByContentHash(mediaType, fileFormat(sourcePath), contentHash)
+	if err != nil {
+		slog.Warn("library duplicate lookup failed", "source_path", sourcePath, "error", err)
+		return "", false
+	}
+	if existing == nil {
+		return "", false
+	}
+	slog.Info("import skipped organize: content already in library",
+		"source_path", sourcePath,
+		"existing_record_id", existing.ID,
+		"existing_path", existing.FilePath,
+		"content_hash", contentHash,
+	)
+	return existing.FilePath, true
 }
 
 func mangaLibraryTitle(path, fallback string) string {

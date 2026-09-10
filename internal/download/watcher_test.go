@@ -12,6 +12,7 @@ import (
 
 	"github.com/JeremiahM37/librarr/internal/config"
 	"github.com/JeremiahM37/librarr/internal/db"
+	"github.com/JeremiahM37/librarr/internal/models"
 	"github.com/JeremiahM37/librarr/internal/organize"
 )
 
@@ -446,6 +447,70 @@ func TestNormalizeTorrentPath(t *testing.T) {
 // manga path-traversal report (Mahmoud Hassan): the download watcher passes the
 // torrent name straight into OrganizeManga, so a malicious torrent name is an
 // unauthenticated route to the same arbitrary write.
+func TestImportMangaSkipsOrganizeWhenContentAlreadyInLibrary(t *testing.T) {
+	root := t.TempDir()
+	mangaDir := filepath.Join(root, "manga")
+	canonicalDir := filepath.Join(mangaDir, "Monster")
+	wrongDir := filepath.Join(mangaDir, "Monster Complete")
+	downloadDir := filepath.Join(root, "downloads", "Monster Complete")
+	for _, dir := range []string{canonicalDir, downloadDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := []byte("monster volume payload")
+	canonicalPath := filepath.Join(canonicalDir, "monster v01.cbr")
+	downloadPath := filepath.Join(downloadDir, "monster v01.cbr")
+	if err := os.WriteFile(canonicalPath, payload, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(downloadPath, payload, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err := db.New(filepath.Join(root, "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	contentHash := db.HashLibraryFile(canonicalPath)
+	if contentHash == "" {
+		t.Fatal("expected content hash")
+	}
+	if _, err := database.AddItem(&models.LibraryItem{
+		Title:       "Monster",
+		FilePath:    canonicalPath,
+		FileFormat:  "cbr",
+		MediaType:   "manga",
+		Source:      "torrent",
+		SourceID:    "old-hash",
+		ContentHash: contentHash,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		FileOrgEnabled: true,
+		MangaDir:       mangaDir,
+		ImportMode:     config.ImportModeCopy,
+	}
+	w := NewWatcher(cfg, database, nil, nil, organize.NewOrganizer(cfg), nil, nil)
+	info := TorrentInfo{Name: "Monster Complete", Hash: "810cce", TotalSize: int64(len(payload))}
+
+	if _, err := w.importManga(info, downloadDir, "torrent"); err != nil {
+		t.Fatalf("importManga: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wrongDir, "monster v01.cbr")); err == nil {
+		t.Fatal("organize should not copy duplicate content into torrent-named folder")
+	}
+
+	count, err := database.CountItems("manga")
+	if err != nil || count != 1 {
+		t.Fatalf("CountItems = %d, %v; want one canonical row", count, err)
+	}
+}
+
 func TestImportMangaRejectsTraversalTorrentName(t *testing.T) {
 	root := t.TempDir()
 	mangaDir := filepath.Join(root, "manga")
