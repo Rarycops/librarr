@@ -48,6 +48,8 @@ type grab struct {
 	title    string
 	wantedID int64
 	hash     string
+	savePath string
+	category string
 }
 
 // fakeDownloader records grabs and can be made to fail. Like the real
@@ -61,22 +63,28 @@ type fakeDownloader struct {
 	seq   int
 }
 
-func (f *fakeDownloader) StartAnnasDownloadFor(md5, title string, wantedID int64) (*models.DownloadJob, error) {
+func (f *fakeDownloader) StartAnnasDownloadForMediaType(md5, title, _ string, wantedID int64) (*models.DownloadJob, error) {
 	return f.job("annas", md5, title, wantedID)
 }
 
-func (f *fakeDownloader) StartDirectDownloadFor(fileURL, title, _, _, _ string, wantedID int64) (*models.DownloadJob, error) {
+func (f *fakeDownloader) StartDirectDownloadForMediaType(fileURL, title, _, _, _, _ string, wantedID int64) (*models.DownloadJob, error) {
 	return f.job("direct", fileURL, title, wantedID)
 }
 
-func (f *fakeDownloader) StartTorrentDownload(torrentURL, title, _, _, expectedInfoHash string) error {
+func (f *fakeDownloader) StartTorrentDownloadRef(torrentURL, title, savePath, category, expectedInfoHash string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.fail != nil {
-		return f.fail
+		return "", f.fail
 	}
-	f.grabs = append(f.grabs, grab{kind: "torrent", url: torrentURL, title: title, hash: expectedInfoHash})
-	return nil
+	f.grabs = append(f.grabs, grab{
+		kind: "torrent", url: torrentURL, title: title, hash: expectedInfoHash,
+		savePath: savePath, category: category,
+	})
+	if expectedInfoHash == "" {
+		return "", nil
+	}
+	return "torrent:" + strings.ToLower(expectedInfoHash), nil
 }
 
 func (f *fakeDownloader) job(kind, url, title string, wantedID int64) (*models.DownloadJob, error) {
@@ -170,6 +178,33 @@ func (f *schedFixture) addFile(wantedID int64, title, format string) int64 {
 		f.t.Fatal(err)
 	}
 	return itemID
+}
+
+func TestSearchItem_TorrentURLUsesWantedMediaRoute(t *testing.T) {
+	f := newSchedFixture(t)
+	id := f.want("Look Back", "Tatsuki Fujimoto", "manga")
+	f.cfg.QBMangaSavePath = "/manga-incoming"
+	f.cfg.QBMangaCategory = "manga"
+	f.srch.results["Look Back"] = []models.SearchResult{{
+		Title:            "Look Back by Tatsuki Fujimoto [ENG / CBZ]",
+		Source:           "prowlarr_manga",
+		Format:           "cbz",
+		Score:            90,
+		DownloadURL:      "http://prowlarr.local/download",
+		DownloadProtocol: "torrent",
+	}}
+
+	out, err := f.s.SearchItem(context.Background(), id, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Action != "grabbed" {
+		t.Fatalf("outcome: %+v", out)
+	}
+	got := f.dl.last()
+	if got.kind != "torrent" || got.savePath != "/manga-incoming" || got.category != "manga" {
+		t.Fatalf("grab: %+v", got)
+	}
 }
 
 func res(title, source, format string, score float64, url string) models.SearchResult {

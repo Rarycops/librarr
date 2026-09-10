@@ -115,3 +115,16 @@ func TestSchedulerSettingsFieldsMatchAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestWantedSearchCarriesAuthor(t *testing.T) {
+	js := appJS(t)
+	for _, want := range []string{
+		`data-author="${escapeHtml(item.author || '')}"`,
+		`searchWishlistItem(el.dataset.title, el.dataset.mediaType, el.dataset.author)`,
+		"doSearch(title, author)",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("wanted search is missing author propagation: %s", want)
+		}
+	}
+}

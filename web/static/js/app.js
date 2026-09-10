@@ -1064,7 +1064,7 @@ document.getElementById('search-input').addEventListener('keydown', (e) => {
   }
 });
 
-async function doSearch(query) {
+async function doSearch(query, author = '') {
   const endpoints = { ebooks: '/api/search', audiobooks: '/api/search/audiobooks', manga: '/api/search/manga' };
   const endpoint = endpoints[state.searchTab] || '/api/search';
   const streamEndpoint = `${endpoint}/stream`;
@@ -1084,12 +1084,12 @@ async function doSearch(query) {
   document.getElementById('search-spinner').classList.remove('hidden');
 
   try {
-    await doStreamingSearch(streamEndpoint, query, gen, searchAbort.signal);
+    await doStreamingSearch(streamEndpoint, query, gen, searchAbort.signal, author);
   } catch (err) {
     if (err.name === 'AbortError') return; // expected — new search superseded this one
     if (gen !== searchGeneration) return;
     try {
-      await doJsonSearch(endpoint, query, gen, searchAbort.signal);
+      await doJsonSearch(endpoint, query, gen, searchAbort.signal, author);
     } catch (fallbackErr) {
       if (fallbackErr.name === 'AbortError') return;
       if (gen !== searchGeneration) return;
@@ -1102,14 +1102,20 @@ async function doSearch(query) {
   }
 }
 
-async function doJsonSearch(endpoint, query, gen, signal) {
-  const data = await apiJson(`${endpoint}?q=${encodeURIComponent(query)}`, { signal });
+function searchURL(endpoint, query, author = '') {
+  const params = new URLSearchParams({ q: query });
+  if (author) params.set('author', author);
+  return `${endpoint}?${params}`;
+}
+
+async function doJsonSearch(endpoint, query, gen, signal, author = '') {
+  const data = await apiJson(searchURL(endpoint, query, author), { signal });
   if (gen !== searchGeneration) return;
   updateSearchResults(data.results || [], false);
 }
 
-async function doStreamingSearch(endpoint, query, gen, signal) {
-  const resp = await api(`${endpoint}?q=${encodeURIComponent(query)}`, {
+async function doStreamingSearch(endpoint, query, gen, signal, author = '') {
+  const resp = await api(searchURL(endpoint, query, author), {
     signal,
     headers: { Accept: 'text/event-stream' },
   });
@@ -2259,7 +2265,7 @@ function renderWishlistItem(item) {
           </label>
           <select data-action-change="setWantedProfile" data-id="${item.id}" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 max-w-[10rem]" title="Quality profile">${profileOptionsFor(mediaType, item.quality_profile_id)}</select>
           ${adminButtons}
-          <button data-action="searchWishlistItem" data-title="${escapeHtml(item.title)}" data-media-type="${escapeHtml(mediaType)}" class="px-2.5 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors" title="${t('wishlist_search')}">${t('wishlist_search')}</button>
+          <button data-action="searchWishlistItem" data-title="${escapeHtml(item.title)}" data-author="${escapeHtml(item.author || '')}" data-media-type="${escapeHtml(mediaType)}" class="px-2.5 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors" title="${t('wishlist_search')}">${t('wishlist_search')}</button>
           <button data-action="deleteWishlistItem" data-id="${item.id}" class="px-2.5 py-1 text-xs bg-slate-700 hover:bg-red-600 text-slate-300 hover:text-white rounded transition-colors" title="Remove">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
           </button>
@@ -2398,12 +2404,12 @@ async function runSchedulerNow() {
   }
 }
 
-function searchWishlistItem(title, mediaType) {
+function searchWishlistItem(title, mediaType, author = '') {
   const tabMap = { ebook: 'ebooks', audiobook: 'audiobooks', manga: 'manga' };
   switchTab('search');
   switchSearchTab(tabMap[mediaType] || 'ebooks');
   document.getElementById('search-input').value = title;
-  doSearch(title);
+  doSearch(title, author);
 }
 
 // ---------- Settings: scheduler / upgrades ----------
@@ -3553,7 +3559,7 @@ const CLICK_ACTIONS = {
   closeMangaSeries: () => closeMangaSeries(),
   requestMangaMissing: el => requestMangaMissing(el.dataset.seriesTitle),
   goLibraryPage: el => goLibraryPage(+el.dataset.page),
-  searchWishlistItem: el => searchWishlistItem(el.dataset.title, el.dataset.mediaType),
+  searchWishlistItem: el => searchWishlistItem(el.dataset.title, el.dataset.mediaType, el.dataset.author),
   deleteWishlistItem: el => deleteWishlistItem(+el.dataset.id),
   searchWantedNow: el => searchWantedNow(+el.dataset.id, false),
   explainWanted: el => searchWantedNow(+el.dataset.id, true),

@@ -563,7 +563,7 @@ func (s *Server) processApprovedRequest(req *models.Request) {
 	default:
 		// Direct download (Anna's Archive, Gutenberg, etc.)
 		if dlReq.MD5 != "" {
-			job, err := s.downloadMgr.StartAnnasDownload(dlReq.MD5, dlReq.Title)
+			job, err := s.downloadMgr.StartAnnasDownloadForMediaType(dlReq.MD5, dlReq.Title, dlReq.MediaType, 0)
 			if err != nil {
 				s.failRequest(req, fmt.Sprintf("Download failed: %v", err))
 				return
@@ -580,7 +580,9 @@ func (s *Server) processApprovedRequest(req *models.Request) {
 			if fileURL == "" {
 				fileURL = dlReq.URL
 			}
-			job, err := s.downloadMgr.StartDirectDownload(fileURL, dlReq.Title, dlReq.Source, dlReq.SourceID, dlReq.Author)
+			job, err := s.downloadMgr.StartDirectDownloadForMediaType(
+				fileURL, dlReq.Title, dlReq.Source, dlReq.SourceID, dlReq.Author, dlReq.MediaType, 0,
+			)
 			if err != nil {
 				s.failRequest(req, fmt.Sprintf("Download failed: %v", err))
 				return

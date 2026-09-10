@@ -175,6 +175,42 @@ func TestWantedGrab_UpgradeReplacesOldFile(t *testing.T) {
 	}
 }
 
+func TestDirectWantedGrabUsesMangaLibrary(t *testing.T) {
+	h := newWantedHarness(t)
+	h.cfg.MangaDir = filepath.Join(t.TempDir(), "manga")
+	wantedID, err := h.db.AddWishlistItem("Look Back", "Tatsuki Fujimoto", "manga")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := h.manager.StartDirectDownloadForMediaType(
+		h.server.URL+"/look-back.epub",
+		"Look Back",
+		"mangadex",
+		"",
+		"Tatsuki Fujimoto",
+		"manga",
+		wantedID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.waitJob(job, "completed")
+
+	wanted, err := h.db.GetWishlistItem(wantedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := h.db.GetItem(wanted.LibraryItemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wanted.MediaType != "manga" || item.MediaType != "manga" ||
+		!strings.HasPrefix(item.FilePath, h.cfg.MangaDir+string(filepath.Separator)) {
+		t.Fatalf("direct manga import: wanted=%+v item=%+v", wanted, item)
+	}
+}
+
 func TestWantedGrab_KeepOldFilesLeavesBoth(t *testing.T) {
 	h := newWantedHarness(t)
 	h.cfg.UpgradeKeepOldFiles = true

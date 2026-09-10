@@ -28,9 +28,9 @@ type wantedSearcher interface {
 // wantedDownloader is the slice of download.Manager the scheduler uses. Every
 // grab carries the wanted row it serves so the import can link back to it.
 type wantedDownloader interface {
-	StartAnnasDownloadFor(md5, title string, wantedID int64) (*models.DownloadJob, error)
-	StartDirectDownloadFor(fileURL, title, source, sourceID, author string, wantedID int64) (*models.DownloadJob, error)
-	StartTorrentDownload(torrentURL, title, savePath, category, expectedInfoHash string) error
+	StartAnnasDownloadForMediaType(md5, title, mediaType string, wantedID int64) (*models.DownloadJob, error)
+	StartDirectDownloadForMediaType(fileURL, title, source, sourceID, author, mediaType string, wantedID int64) (*models.DownloadJob, error)
+	StartTorrentDownloadRef(torrentURL, title, savePath, category, expectedInfoHash string) (string, error)
 }
 
 // Scheduler is the wanted-list loop: for every monitored item it searches,
@@ -549,27 +549,31 @@ func (s *Scheduler) startDownload(result models.SearchResult, item models.Wishli
 	title := item.Title
 	switch {
 	case result.MD5 != "":
-		job, err := s.downloadMgr.StartAnnasDownloadFor(result.MD5, title, item.ID)
+		job, err := s.downloadMgr.StartAnnasDownloadForMediaType(result.MD5, title, item.MediaType, item.ID)
 		if err != nil {
 			return "", err
 		}
 		return job.ID, nil
-	case result.DownloadURL != "" || result.EpubURL != "":
-		dlURL := result.DownloadURL
-		if dlURL == "" {
-			dlURL = result.EpubURL
-		}
-		job, err := s.downloadMgr.StartDirectDownloadFor(dlURL, title, result.Source, result.SourceID, result.Author, item.ID)
-		if err != nil {
-			return "", err
-		}
-		return job.ID, nil
-	case result.MagnetURL != "" || result.InfoHash != "":
+	case result.DownloadProtocol == "torrent" || result.MagnetURL != "" || result.InfoHash != "":
 		url := result.MagnetURL
+		if url == "" {
+			url = result.DownloadURL
+		}
 		if url == "" {
 			url = "magnet:?xt=urn:btih:" + result.InfoHash
 		}
-		err := s.downloadMgr.StartTorrentDownload(url, title, "", "", result.InfoHash)
+		savePath, category := s.cfg.QBSavePath, s.cfg.QBCategory
+		switch item.MediaType {
+		case "audiobook":
+			savePath, category = s.cfg.QBAudiobookSavePath, s.cfg.QBAudiobookCategory
+		case "manga":
+			savePath, category = s.cfg.QBMangaSavePath, s.cfg.QBMangaCategory
+		}
+		torrentTitle := result.Title
+		if torrentTitle == "" {
+			torrentTitle = title
+		}
+		ref, err := s.downloadMgr.StartTorrentDownloadRef(url, torrentTitle, savePath, category, result.InfoHash)
 		if err != nil {
 			var verificationWarning *download.TorrentVerificationWarning
 			if errors.As(err, &verificationWarning) {
@@ -578,7 +582,19 @@ func (s *Scheduler) startDownload(result models.SearchResult, item models.Wishli
 				return "", err
 			}
 		}
-		return download.TorrentWantedRef(result.InfoHash), nil
+		return ref, nil
+	case result.DownloadURL != "" || result.EpubURL != "":
+		dlURL := result.DownloadURL
+		if dlURL == "" {
+			dlURL = result.EpubURL
+		}
+		job, err := s.downloadMgr.StartDirectDownloadForMediaType(
+			dlURL, title, result.Source, result.SourceID, result.Author, item.MediaType, item.ID,
+		)
+		if err != nil {
+			return "", err
+		}
+		return job.ID, nil
 	}
 	return "", errors.New("release has no downloadable link")
 }

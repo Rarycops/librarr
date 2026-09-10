@@ -194,7 +194,7 @@ func (s *Server) handleDirectDownloadReq(w http.ResponseWriter, req models.Downl
 			return
 		}
 
-		job, err := s.downloadMgr.StartAnnasDownload(req.MD5, req.Title)
+		job, err := s.downloadMgr.StartAnnasDownloadForMediaType(req.MD5, req.Title, req.MediaType, 0)
 		if err != nil {
 			slog.Error("anna's download start failed", "title", req.Title, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
@@ -235,7 +235,9 @@ func (s *Server) handleDirectDownloadReq(w http.ResponseWriter, req models.Downl
 			return
 		}
 
-		job, err := s.downloadMgr.StartDirectDownload(dlURL, req.Title, req.Source, sourceID, req.Author)
+		job, err := s.downloadMgr.StartDirectDownloadForMediaType(
+			dlURL, req.Title, req.Source, sourceID, req.Author, req.MediaType, 0,
+		)
 		if err != nil {
 			slog.Error("direct download start failed", "title", req.Title, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{

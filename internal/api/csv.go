@@ -121,19 +121,31 @@ func (s *Server) handleCSVImport(w http.ResponseWriter, r *http.Request) {
 
 			// Queue download.
 			if best.MD5 != "" {
-				s.downloadMgr.StartAnnasDownload(best.MD5, title)
+				s.downloadMgr.StartAnnasDownloadForMediaType(best.MD5, title, mediaType, 0)
+			} else if best.DownloadProtocol == "torrent" || best.MagnetURL != "" || best.InfoHash != "" {
+				url := best.MagnetURL
+				if url == "" {
+					url = best.DownloadURL
+				}
+				if url == "" {
+					url = "magnet:?xt=urn:btih:" + best.InfoHash
+				}
+				savePath, category := s.cfg.QBSavePath, s.cfg.QBCategory
+				switch mediaType {
+				case "audiobook":
+					savePath, category = s.cfg.QBAudiobookSavePath, s.cfg.QBAudiobookCategory
+				case "manga":
+					savePath, category = s.cfg.QBMangaSavePath, s.cfg.QBMangaCategory
+				}
+				s.downloadMgr.StartTorrentDownload(url, title, savePath, category, best.InfoHash)
 			} else if best.DownloadURL != "" || best.EpubURL != "" {
 				dlURL := best.DownloadURL
 				if dlURL == "" {
 					dlURL = best.EpubURL
 				}
-				s.downloadMgr.StartDirectDownload(dlURL, title, best.Source, best.SourceID, best.Author)
-			} else if best.MagnetURL != "" || best.InfoHash != "" {
-				url := best.MagnetURL
-				if url == "" {
-					url = "magnet:?xt=urn:btih:" + best.InfoHash
-				}
-				s.downloadMgr.StartTorrentDownload(url, title, "", "", best.InfoHash)
+				s.downloadMgr.StartDirectDownloadForMediaType(
+					dlURL, title, best.Source, best.SourceID, best.Author, mediaType, 0,
+				)
 			} else {
 				slog.Warn("CSV import: no downloadable result", "title", title)
 			}

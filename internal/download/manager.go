@@ -83,15 +83,21 @@ func isActiveJobStatus(status string) bool {
 
 // StartAnnasDownload starts a background download from Anna's Archive.
 func (m *Manager) StartAnnasDownload(md5, title string) (*models.DownloadJob, error) {
-	return m.StartAnnasDownloadFor(md5, title, 0)
+	return m.StartAnnasDownloadForMediaType(md5, title, "ebook", 0)
 }
 
 // StartAnnasDownloadFor is StartAnnasDownload for a grab that satisfies a
 // wanted-list row: the finished import links the row to the new file.
 func (m *Manager) StartAnnasDownloadFor(md5, title string, wantedID int64) (*models.DownloadJob, error) {
+	return m.StartAnnasDownloadForMediaType(md5, title, "ebook", wantedID)
+}
+
+// StartAnnasDownloadForMediaType starts an Anna's grab for any supported
+// library type and optionally links the finished import to a wanted row.
+func (m *Manager) StartAnnasDownloadForMediaType(md5, title, mediaType string, wantedID int64) (*models.DownloadJob, error) {
 	job := m.createJob(title, "annas", fmt.Sprintf("https://%s/md5/%s", m.cfg.AnnasArchiveDomain, md5))
 	job.MD5 = md5
-	job.MediaType = "ebook"
+	job.MediaType = normalizeMediaType(mediaType)
 	job.WantedID = wantedID
 
 	if err := m.db.SaveJob(job); err != nil {
@@ -104,13 +110,55 @@ func (m *Manager) StartAnnasDownloadFor(md5, title string, wantedID int64) (*mod
 
 // StartTorrentDownload adds a torrent to the active torrent client.
 func (m *Manager) StartTorrentDownload(torrentURL, title, savePath, category, expectedInfoHash string) error {
+	_, err := m.StartTorrentDownloadRef(torrentURL, title, savePath, category, expectedInfoHash)
+	return err
+}
+
+// StartTorrentDownloadRef adds a torrent and returns the active marker the
+// watcher can use to settle a wanted row. Prowlarr sometimes omits the hash
+// from its search response, so recover it from the accepted client entry.
+func (m *Manager) StartTorrentDownloadRef(torrentURL, title, savePath, category, expectedInfoHash string) (string, error) {
 	if m.torrent == nil {
-		return fmt.Errorf("no torrent download client configured")
+		return "", fmt.Errorf("no torrent download client configured")
 	}
 	if err := m.validateClientFetchURL(torrentURL); err != nil {
-		return err
+		return "", err
 	}
-	return m.torrent.AddTorrent(torrentURL, title, savePath, category, expectedInfoHash)
+	err := m.torrent.AddTorrent(torrentURL, title, savePath, category, expectedInfoHash)
+	var verificationWarning *TorrentVerificationWarning
+	if err != nil && !errors.As(err, &verificationWarning) {
+		return "", err
+	}
+
+	expectedHash := firstNonEmptyHash(expectedInfoHash, infoHashFromMagnet(torrentURL))
+	infoHash := ""
+	torrents, listErr := m.torrent.GetTorrents(category)
+	if listErr == nil {
+		for _, torrent := range torrents {
+			if firstNonEmptyHash(torrent.Hash) == expectedHash {
+				infoHash = torrent.Hash
+				break
+			}
+		}
+		if infoHash == "" {
+			for _, torrent := range torrents {
+				if torrentTitleMatches(title, torrent.Name) {
+					infoHash = torrent.Hash
+					break
+				}
+			}
+		}
+	}
+	if infoHash == "" && isMagnetURL(torrentURL) {
+		infoHash = expectedHash
+	}
+	return TorrentWantedRef(infoHash), err
+}
+
+func torrentTitleMatches(wanted, torrent string) bool {
+	wanted = strings.ToLower(strings.TrimSpace(wanted))
+	torrent = strings.ToLower(strings.TrimSpace(torrent))
+	return wanted != "" && torrent != "" && (wanted == torrent || strings.Contains(torrent, wanted))
 }
 
 // validateClientFetchURL guards URLs handed to the torrent/NZB client. The
@@ -159,12 +207,18 @@ func (m *Manager) StartNZBDownload(nzbURL, title, mediaType string) (string, err
 
 // StartDirectDownload starts a background download from a direct URL.
 func (m *Manager) StartDirectDownload(fileURL, title, source, sourceID, author string) (*models.DownloadJob, error) {
-	return m.StartDirectDownloadFor(fileURL, title, source, sourceID, author, 0)
+	return m.StartDirectDownloadForMediaType(fileURL, title, source, sourceID, author, "ebook", 0)
 }
 
 // StartDirectDownloadFor is StartDirectDownload for a grab that satisfies a
 // wanted-list row (wantedID 0 means none).
 func (m *Manager) StartDirectDownloadFor(fileURL, title, source, sourceID, author string, wantedID int64) (*models.DownloadJob, error) {
+	return m.StartDirectDownloadForMediaType(fileURL, title, source, sourceID, author, "ebook", wantedID)
+}
+
+// StartDirectDownloadForMediaType starts a direct download for any supported
+// library type and optionally links the finished import to a wanted row.
+func (m *Manager) StartDirectDownloadForMediaType(fileURL, title, source, sourceID, author, mediaType string, wantedID int64) (*models.DownloadJob, error) {
 	// Validate at the single entry point shared by every caller (API download
 	// handler, request fulfillment, CSV import) so none can bypass the SSRF
 	// guard. Redirect hops and HTML-scraped follow-up URLs are re-validated
@@ -174,7 +228,7 @@ func (m *Manager) StartDirectDownloadFor(fileURL, title, source, sourceID, autho
 	}
 
 	job := m.createJob(title, source, fileURL)
-	job.MediaType = "ebook"
+	job.MediaType = normalizeMediaType(mediaType)
 	job.SourceID = sourceID
 	job.WantedID = wantedID
 
@@ -184,6 +238,15 @@ func (m *Manager) StartDirectDownloadFor(fileURL, title, source, sourceID, autho
 
 	go m.runDirectDownload(job, fileURL, sourceID, author)
 	return job, nil
+}
+
+func normalizeMediaType(mediaType string) string {
+	switch mediaType {
+	case "manga", "audiobook":
+		return mediaType
+	default:
+		return "ebook"
+	}
 }
 
 func (m *Manager) createJob(title, source, url string) *models.DownloadJob {
@@ -356,22 +419,8 @@ func (m *Manager) runAnnasDownload(job *models.DownloadJob) {
 	// Run post-download pipeline.
 	m.updateJob(job, "importing", "Organizing file...", "")
 
-	// Try to extract author from EPUB metadata.
-	author := ""
-	if strings.HasSuffix(strings.ToLower(filePath), ".epub") {
-		if meta, err := organize.ExtractEPUBMeta(filePath); err == nil && meta.Author != "" {
-			author = meta.Author
-		}
-	}
-
-	// A direct HTTP download is librarr's own file, not a seedable payload, so
-	// it always moves regardless of IMPORT_MODE — hardlinking or copying would
-	// leave a duplicate behind in the incoming directory forever.
-	destPath, err := m.organizer.Moving().OrganizeEbook(filePath, job.Title, author)
-	if err != nil {
-		slog.Warn("organize failed, keeping in place", "error", err)
-		destPath = filePath
-	}
+	destPath, author := m.organizeDownloadedFile(job, filePath, "")
+	mediaType := normalizeMediaType(job.MediaType)
 
 	// Record in library.
 	outcome, err := m.db.AddItemWithOutcome(&models.LibraryItem{
@@ -381,7 +430,7 @@ func (m *Manager) runAnnasDownload(job *models.DownloadJob) {
 		OriginalPath: filePath,
 		FileSize:     fileSize,
 		FileFormat:   importedFormat(destPath),
-		MediaType:    "ebook",
+		MediaType:    mediaType,
 		Source:       "annas",
 		SourceID:     downloadedMD5,
 	})
@@ -391,9 +440,7 @@ func (m *Manager) runAnnasDownload(job *models.DownloadJob) {
 	m.wantedImported(job, outcome)
 
 	// Trigger library imports.
-	if m.targets != nil {
-		m.targets.ImportEbook(destPath, job.Title, author)
-	}
+	m.importTarget(mediaType, destPath, job.Title, author)
 
 	_ = m.db.LogEvent("download_complete", job.Title, fmt.Sprintf("Downloaded from Anna's Archive (%s)", search.HumanSize(fileSize)), nil, job.ID)
 
@@ -451,22 +498,8 @@ func (m *Manager) runDirectDownload(job *models.DownloadJob, fileURL, sourceID, 
 
 	m.updateJob(job, "importing", "Organizing file...", "")
 
-	// Try to extract author from EPUB metadata.
-	author := ""
-	if strings.HasSuffix(strings.ToLower(filePath), ".epub") {
-		if meta, err := organize.ExtractEPUBMeta(filePath); err == nil && meta.Author != "" {
-			author = meta.Author
-		}
-	}
-
-	// A direct HTTP download is librarr's own file, not a seedable payload, so
-	// it always moves regardless of IMPORT_MODE — hardlinking or copying would
-	// leave a duplicate behind in the incoming directory forever.
-	destPath, err := m.organizer.Moving().OrganizeEbook(filePath, job.Title, author)
-	if err != nil {
-		slog.Warn("organize failed, keeping in place", "error", err)
-		destPath = filePath
-	}
+	destPath, author := m.organizeDownloadedFile(job, filePath, authorHint)
+	mediaType := normalizeMediaType(job.MediaType)
 
 	outcome, err := m.db.AddItemWithOutcome(&models.LibraryItem{
 		Title:        job.Title,
@@ -475,7 +508,7 @@ func (m *Manager) runDirectDownload(job *models.DownloadJob, fileURL, sourceID, 
 		OriginalPath: filePath,
 		FileSize:     fileSize,
 		FileFormat:   importedFormat(destPath),
-		MediaType:    "ebook",
+		MediaType:    mediaType,
 		Source:       job.Source,
 		SourceID:     job.SourceID,
 	})
@@ -485,9 +518,7 @@ func (m *Manager) runDirectDownload(job *models.DownloadJob, fileURL, sourceID, 
 	m.wantedImported(job, outcome)
 
 	// Trigger library imports.
-	if m.targets != nil {
-		m.targets.ImportEbook(destPath, job.Title, author)
-	}
+	m.importTarget(mediaType, destPath, job.Title, author)
 
 	_ = m.db.LogEvent("download_complete", job.Title, fmt.Sprintf("Downloaded (%s)", search.HumanSize(fileSize)), nil, job.ID)
 
@@ -502,6 +533,48 @@ func (m *Manager) runDirectDownload(job *models.DownloadJob, fileURL, sourceID, 
 			Message: fmt.Sprintf("'%s' downloaded (%s)", job.Title, search.HumanSize(fileSize)),
 			Status:  "completed",
 		})
+	}
+}
+
+func (m *Manager) organizeDownloadedFile(job *models.DownloadJob, filePath, authorHint string) (string, string) {
+	mediaType := normalizeMediaType(job.MediaType)
+	author := authorHint
+	if mediaType == "ebook" && author == "" && strings.HasSuffix(strings.ToLower(filePath), ".epub") {
+		if meta, err := organize.ExtractEPUBMeta(filePath); err == nil {
+			author = meta.Author
+		}
+	}
+
+	var (
+		destPath string
+		err      error
+	)
+	switch mediaType {
+	case "manga":
+		destPath, err = m.organizer.Moving().OrganizeManga(filePath, job.Title)
+	case "audiobook":
+		destPath, err = m.organizer.Moving().OrganizeAudiobook(filePath, job.Title, author)
+	default:
+		destPath, err = m.organizer.Moving().OrganizeEbook(filePath, job.Title, author)
+	}
+	if err != nil {
+		slog.Warn("organize failed, keeping in place", "error", err)
+		destPath = filePath
+	}
+	return destPath, author
+}
+
+func (m *Manager) importTarget(mediaType, filePath, title, author string) {
+	if m.targets == nil {
+		return
+	}
+	switch mediaType {
+	case "manga":
+		m.targets.ImportManga(filePath, title)
+	case "audiobook":
+		m.targets.ImportAudiobook()
+	default:
+		m.targets.ImportEbook(filePath, title, author)
 	}
 }
 
