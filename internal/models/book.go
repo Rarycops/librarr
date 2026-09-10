@@ -170,7 +170,8 @@ type WishlistItem struct {
 	LastSearched time.Time `json:"last_searched,omitempty"`
 	LastResult   string    `json:"last_result,omitempty"`
 	// Source records who added the item: "manual", "author:<id>", "import".
-	Source string `json:"source,omitempty"`
+	Source     string `json:"source,omitempty"`
+	ReleaseKey string `json:"release_key,omitempty"`
 
 	// Derived at response time, never stored.
 	State       string `json:"state,omitempty"`
