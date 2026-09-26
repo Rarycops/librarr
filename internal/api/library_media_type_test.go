@@ -163,26 +163,50 @@ func TestLocalLibrarySearchAndPagination(t *testing.T) {
 			pageSize := 50
 			if category == "manga" {
 				handler = s.handleLibraryManga
-				pageSize = 100
+				pageSize = 1000
 			}
 			if category == "audiobook" {
 				handler = s.handleLibraryAudiobooks
 				pageSize = 100
 			}
-			for _, tc := range []struct {
+			pages := func(total int) int {
+				if total == 0 {
+					return 0
+				}
+				return (total + pageSize - 1) / pageSize
+			}
+			cases := []struct {
 				query                     string
 				total, page, pages, count int
 			}{
-				{"?q=needle&page=2", 101, 2, (101 + pageSize - 1) / pageSize, min(pageSize, 101-pageSize)},
+				{"?q=needle&page=2", 101, 2, pages(101), min(pageSize, max(0, 101-pageSize))},
 				{"?q=NEEDLE+100", 1, 1, 1, 1},
-				{"?q=unique+writer", 101, 1, (101 + pageSize - 1) / pageSize, pageSize},
+				{"?q=unique+writer", 101, 1, pages(101), min(pageSize, 101)},
 				{"?q=absent", 0, 1, 0, 0},
 				{"?q=%25", 0, 1, 0, 0},
 				{"?q=_", 0, 1, 0, 0},
 				{"?q=%27+OR+1%3D1--", 0, 1, 0, 0},
-				{"?q=needle&page=-1", 101, 1, (101 + pageSize - 1) / pageSize, pageSize},
-				{"?q=needle&page=999999999999", 101, 1, (101 + pageSize - 1) / pageSize, pageSize},
-			} {
+				{"?q=needle&page=-1", 101, 1, pages(101), min(pageSize, 101)},
+				{"?q=needle&page=999999999999", 101, 1, pages(101), min(pageSize, 101)},
+			}
+			if category == "manga" {
+				// ponytail: manga uses one 1000-item page so the UI can group full series.
+				cases = []struct {
+					query                     string
+					total, page, pages, count int
+				}{
+					{"?q=needle&page=2", 101, 2, 1, 0},
+					{"?q=NEEDLE+100", 1, 1, 1, 1},
+					{"?q=unique+writer", 101, 1, 1, 101},
+					{"?q=absent", 0, 1, 0, 0},
+					{"?q=%25", 0, 1, 0, 0},
+					{"?q=_", 0, 1, 0, 0},
+					{"?q=%27+OR+1%3D1--", 0, 1, 0, 0},
+					{"?q=needle&page=-1", 101, 1, 1, 101},
+					{"?q=needle&page=999999999999", 101, 1, 1, 101},
+				}
+			}
+			for _, tc := range cases {
 				t.Run(tc.query, func(t *testing.T) {
 					rr := httptest.NewRecorder()
 					handler(rr, httptest.NewRequest("GET", "/api/library"+tc.query, nil))
