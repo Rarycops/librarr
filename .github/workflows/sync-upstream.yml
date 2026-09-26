@@ -19,21 +19,24 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream main
+        id: merge
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/JeremiahM37/librarr.git
           git fetch --prune upstream main
-          git checkout main
-          git reset --hard origin/main
-          if ! git merge --no-commit --no-ff upstream/main; then
-            git merge --abort || true
-            echo "::error::Upstream sync has merge conflicts; resolve them manually."
-            exit 1
+          git checkout -B automation/upstream-sync origin/main
+          if git merge --no-edit upstream/main; then
+            echo "status=clean" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+            echo "::warning::Upstream sync has merge conflicts. Resolve them on automation/upstream-sync and merge the PR manually."
           fi
 
       - name: Open or update upstream PR
+        if: steps.merge.outputs.status == 'clean'
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -48,3 +51,8 @@ jobs:
             This PR is intentionally not auto-merged. Review source changes and
             run the fork checks before merging.
           labels: upstream-sync
+
+      - name: Report merge conflicts
+        if: steps.merge.outputs.status == 'conflict'
+        run: |
+          echo "::error::Upstream sync has merge conflicts in internal/api/library.go, internal/version/VERSION, and/or web/index.html. Check out automation/upstream-sync locally, merge upstream/main, resolve conflicts, push, and open a PR."

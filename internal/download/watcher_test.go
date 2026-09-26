@@ -31,11 +31,11 @@ func TestRecordTorrentItemIsIdempotentAcrossWatcherPolls(t *testing.T) {
 	w := &Watcher{db: database}
 	torrent := TorrentInfo{Name: "Book", Hash: "torrent-hash"}
 
-	first, err := w.recordTorrentItem("torrent", torrent, "ebook", "/downloads/book.epub", filePath, "Book", "Author", "Book", "Author", "epub", 0)
+	first, _, err := w.recordTorrentItem("torrent", torrent, "ebook", "/downloads/book.epub", filePath, "Book", "Author", "Book", "Author", "epub", 0, true)
 	if err != nil || !first {
 		t.Fatalf("first recordTorrentItem = inserted %v, err %v", first, err)
 	}
-	second, err := w.recordTorrentItem("torrent", torrent, "ebook", "/downloads/book.epub", filePath, "Book", "Author", "Book", "Author", "epub", 0)
+	second, _, err := w.recordTorrentItem("torrent", torrent, "ebook", "/downloads/book.epub", filePath, "Book", "Author", "Book", "Author", "epub", 0, true)
 	if err != nil || second {
 		t.Fatalf("second recordTorrentItem = inserted %v, err %v; want idempotent reuse", second, err)
 	}

@@ -2067,10 +2067,32 @@ async function toggleSeriesWatch(seriesName, enabled, releaseMode) {
   }
 }
 
+function mangaSeriesKey(item) {
+  const path = String(item.file_path || '').replace(/\\/g, '/');
+  const marker = '/manga/';
+  const idx = path.toLowerCase().lastIndexOf(marker);
+  if (idx >= 0) {
+    const series = path.slice(idx + marker.length).split('/')[0];
+    if (series) return series;
+  }
+  return item.title || item.name || 'Unknown';
+}
+
+function wantedForMangaSeries(seriesName) {
+  const key = String(seriesName || '').toLowerCase();
+  return (state.wanted?.items || []).find((item) => {
+    if (item.media_type && item.media_type !== 'manga') return false;
+    const title = String(item.title || '').toLowerCase();
+    if (!title) return false;
+    if (title === key) return true;
+    return title.startsWith(`${key} `) || title.startsWith(`${key} v`);
+  });
+}
+
 function renderMangaSeriesGroups(items) {
   const groups = new Map();
   for (const item of items) {
-    const title = item.title || item.name || 'Unknown';
+    const title = mangaSeriesKey(item);
     if (!groups.has(title)) groups.set(title, []);
     groups.get(title).push(item);
   }
@@ -2079,9 +2101,7 @@ function renderMangaSeriesGroups(items) {
   return [...groups.entries()].map(([title, volumes], index) => {
     const coverURL = `/api/library/manga/cover?series=${encodeURIComponent(title)}`;
     const fallback = makePlaceholderHtml(title, index);
-    const wanted = (state.wanted?.items || []).find((item) => (
-      String(item.title || '').toLowerCase() === title.toLowerCase()
-    ));
+    const wanted = wantedForMangaSeries(title);
     const tracked = state.seriesTracking.find((item) => (
       String(item.series_name || '').toLowerCase() === title.toLowerCase()
     ));
@@ -2130,9 +2150,7 @@ function renderMangaSeriesGroups(items) {
 
 function openMangaSeries(title) {
   const volumes = state.mangaGroups.get(title) || [];
-  const wanted = (state.wanted?.items || []).find((item) => (
-    String(item.title || '').toLowerCase() === title.toLowerCase()
-  ));
+  const wanted = wantedForMangaSeries(title);
   const tracked = state.seriesTracking.find((item) => (
     String(item.series_name || '').toLowerCase() === title.toLowerCase()
   ));

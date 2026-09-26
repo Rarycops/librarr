@@ -277,6 +277,17 @@ func TestTorrentWantedRef(t *testing.T) {
 	}
 }
 
+func TestPickMangaPackOutcome(t *testing.T) {
+	outcomes := []db.AddItemOutcome{
+		{ID: 1, NormalizedPath: "/books/manga/One-Punch Man/Volume 01/One-Punch Man v01.cbz"},
+		{ID: 2, NormalizedPath: "/books/manga/One-Punch Man/Volume 33/One-Punch Man v33.cbz"},
+	}
+	got := pickMangaPackOutcome(outcomes)
+	if got.ID != 2 {
+		t.Fatalf("pickMangaPackOutcome() = id %d, want 2", got.ID)
+	}
+}
+
 func TestLinkTorrentToWanted(t *testing.T) {
 	h := newWantedHarness(t)
 	wantedID, _ := h.db.AddWishlistItem("Torrented", "", "ebook")

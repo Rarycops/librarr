@@ -236,6 +236,27 @@ func (e *errReader) Read([]byte) (int, error) {
 	return 0, e.err
 }
 
+func TestOrganizeMangaUsesVolumeSubfolder(t *testing.T) {
+	root := t.TempDir()
+	mangaDir := filepath.Join(root, "manga")
+	src := filepath.Join(root, "incoming", "One-Punch Man v07 (2015) (Digital).cbz")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("cbz"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dest, err := NewOrganizer(&config.Config{FileOrgEnabled: true, MangaDir: mangaDir}).OrganizeManga(src, "One-Punch Man v07 (2015) (Digital)")
+	if err != nil {
+		t.Fatalf("OrganizeManga: %v", err)
+	}
+	wantDir := filepath.Join(mangaDir, "One-Punch Man", "Volume 07")
+	if filepath.Dir(dest) != wantDir {
+		t.Fatalf("dest dir = %q, want %q", filepath.Dir(dest), wantDir)
+	}
+}
+
 // TestOrganizeMangaRejectsTraversalTitle covers the arbitrary-file-write sink
 // reported by Mahmoud Mostafa: cleanSeriesTitle did not strip path separators,
 // so a crafted series title escaped MangaDir via filepath.Join's Clean.

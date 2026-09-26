@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/JeremiahM37/librarr/internal/config"
+	"github.com/JeremiahM37/librarr/internal/models"
+	"github.com/JeremiahM37/librarr/internal/releases"
 )
 
 // Organizer handles post-download file organization.
@@ -165,7 +167,7 @@ func (o *Organizer) OrganizeAudiobook(filePath, title, author string) (string, e
 	return destPath, nil
 }
 
-// OrganizeManga moves manga files into the organized directory structure: {MangaDir}/{Series}/{file}
+// OrganizeManga moves manga into {MangaDir}/{Series}/[{Volume NN}/]{file}.
 // Also copies to KAVITA_MANGA_LIBRARY_PATH if configured.
 func (o *Organizer) OrganizeManga(filePath, seriesTitle string) (string, error) {
 	if !o.cfg.FileOrgEnabled {
@@ -173,11 +175,8 @@ func (o *Organizer) OrganizeManga(filePath, seriesTitle string) (string, error) 
 	}
 
 	safeTitle := cleanSeriesTitle(seriesTitle)
-	destDir, err := joinUnder(o.cfg.MangaDir, safeTitle)
+	seriesDir, err := joinUnder(o.cfg.MangaDir, safeTitle)
 	if err != nil {
-		return filePath, err
-	}
-	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return filePath, err
 	}
 
@@ -194,7 +193,14 @@ func (o *Organizer) OrganizeManga(filePath, seriesTitle string) (string, error) 
 		}
 		for _, entry := range entries {
 			src := filepath.Join(filePath, entry.Name())
-			dst := filepath.Join(destDir, cleanMangaFilename(src))
+			entryDir, err := mangaSeriesDestDir(seriesDir, src)
+			if err != nil {
+				return filePath, err
+			}
+			if err := os.MkdirAll(entryDir, 0755); err != nil {
+				return filePath, err
+			}
+			dst := filepath.Join(entryDir, cleanMangaFilename(src))
 			_ = o.placeFile(src, dst)
 		}
 		// Only a move consumes the download; hardlink/copy must leave the
@@ -202,8 +208,15 @@ func (o *Organizer) OrganizeManga(filePath, seriesTitle string) (string, error) 
 		if !o.KeepsPayload() {
 			_ = os.RemoveAll(filePath)
 		}
-		resultPath = destDir
+		resultPath = seriesDir
 	} else {
+		destDir, err := mangaSeriesDestDir(seriesDir, filePath)
+		if err != nil {
+			return filePath, err
+		}
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			return filePath, err
+		}
 		destPath := filepath.Join(destDir, cleanMangaFilename(filePath))
 		if err := o.placeFile(filePath, destPath); err != nil {
 			return filePath, err
@@ -211,29 +224,60 @@ func (o *Organizer) OrganizeManga(filePath, seriesTitle string) (string, error) 
 		resultPath = destPath
 	}
 
-	// Also copy to Kavita manga library if configured.
-	if o.cfg.KavitaMangaLibraryPath != "" {
-		kavitaDir, err := joinUnder(o.cfg.KavitaMangaLibraryPath, safeTitle)
-		if err == nil && os.MkdirAll(kavitaDir, 0755) == nil {
-			resultInfo, err := os.Stat(resultPath)
-			if err == nil {
-				if resultInfo.IsDir() {
-					entries, _ := os.ReadDir(resultPath)
-					for _, entry := range entries {
-						src := filepath.Join(resultPath, entry.Name())
-						dst := filepath.Join(kavitaDir, entry.Name())
-						_ = copyFileForOrg(src, dst)
-					}
-				} else {
-					dst := filepath.Join(kavitaDir, filepath.Base(resultPath))
-					_ = copyFileForOrg(resultPath, dst)
-				}
-				slog.Info("copied to kavita manga library", "path", kavitaDir)
-			}
-		}
-	}
+	o.mirrorMangaToKavita(safeTitle, seriesDir, resultPath)
 
 	return resultPath, nil
+}
+
+func mangaSeriesDestDir(seriesDir, filePath string) (string, error) {
+	if sub := mangaVolumeDirName(filePath); sub != "" {
+		return joinUnder(seriesDir, sub)
+	}
+	return seriesDir, nil
+}
+
+func mangaVolumeDirName(filePath string) string {
+	kind, seq, ok := releases.ParseMangaReleaseText(filepath.Base(filePath))
+	if !ok || kind != models.ReleaseKindVolume || seq <= 0 {
+		return ""
+	}
+	if seq == float64(int(seq)) {
+		return sanitizePath(fmt.Sprintf("Volume %02.0f", seq), 80)
+	}
+	return sanitizePath(fmt.Sprintf("Volume %g", seq), 80)
+}
+
+func (o *Organizer) mirrorMangaToKavita(safeTitle, seriesDir, resultPath string) {
+	if o.cfg.KavitaMangaLibraryPath == "" {
+		return
+	}
+	kavitaSeries, err := joinUnder(o.cfg.KavitaMangaLibraryPath, safeTitle)
+	if err != nil {
+		return
+	}
+	rel, err := filepath.Rel(seriesDir, resultPath)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		rel = filepath.Base(resultPath)
+	}
+	kavitaDest := filepath.Join(kavitaSeries, rel)
+	if err := os.MkdirAll(filepath.Dir(kavitaDest), 0755); err != nil {
+		return
+	}
+	resultInfo, err := os.Stat(resultPath)
+	if err != nil {
+		return
+	}
+	if resultInfo.IsDir() {
+		entries, _ := os.ReadDir(resultPath)
+		for _, entry := range entries {
+			src := filepath.Join(resultPath, entry.Name())
+			dst := filepath.Join(kavitaDest, entry.Name())
+			_ = copyFileForOrg(src, dst)
+		}
+	} else {
+		_ = copyFileForOrg(resultPath, kavitaDest)
+	}
+	slog.Info("copied to kavita manga library", "path", kavitaDest)
 }
 
 var (

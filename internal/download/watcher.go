@@ -455,7 +455,7 @@ func (w *Watcher) importEbook(t TorrentInfo, savePath, source string) (bool, err
 			inLibrary = false
 		}
 
-		inserted, err := w.recordTorrentItem(source, t, "ebook", bf, destPath, title, author, metadata.Title, metadata.Author, fileFormat(destPath), t.TotalSize)
+		inserted, _, err := w.recordTorrentItem(source, t, "ebook", bf, destPath, title, author, metadata.Title, metadata.Author, fileFormat(destPath), t.TotalSize, true)
 		if err != nil {
 			return false, err
 		}
@@ -505,7 +505,7 @@ func (w *Watcher) importAudiobook(t TorrentInfo, savePath, source string) (bool,
 		return false, fmt.Errorf("organize audiobook %q: %w", savePath, err)
 	}
 
-	inserted, err := w.recordTorrentItem(source, t, "audiobook", savePath, destPath, title, author, title, author, fileFormat(destPath), t.TotalSize)
+	inserted, _, err := w.recordTorrentItem(source, t, "audiobook", savePath, destPath, title, author, title, author, fileFormat(destPath), t.TotalSize, true)
 	if err != nil {
 		return false, err
 	}
@@ -527,6 +527,7 @@ func (w *Watcher) importManga(t TorrentInfo, savePath, source string) (bool, err
 
 	organizer := w.organizerFor(source)
 	inLibrary := true
+	var packOutcomes []db.AddItemOutcome
 	for _, mf := range mangaFiles {
 		destPath, err := w.resolveLibraryPath(organizer, "manga", mf, func() (string, error) {
 			return organizer.OrganizeManga(mf, t.Name)
@@ -540,15 +541,21 @@ func (w *Watcher) importManga(t TorrentInfo, savePath, source string) (bool, err
 		}
 
 		seriesTitle := mangaLibraryTitle(destPath, t.Name)
-		inserted, err := w.recordTorrentItem(source, t, "manga", mf, destPath, seriesTitle, "", seriesTitle, "", fileFormat(destPath), t.TotalSize)
+		inserted, outcome, err := w.recordTorrentItem(source, t, "manga", mf, destPath, seriesTitle, "", seriesTitle, "", fileFormat(destPath), t.TotalSize, false)
 		if err != nil {
 			return false, err
+		}
+
+		if outcome.ID != 0 {
+			packOutcomes = append(packOutcomes, outcome)
 		}
 
 		if inserted && w.targets != nil {
 			w.targets.ImportManga(destPath, seriesTitle)
 		}
 	}
+
+	linkTorrentMangaPackToWanted(w.db, w.organizer, w.cfg, t, packOutcomes)
 
 	return inLibrary, nil
 }
@@ -592,10 +599,15 @@ func mangaLibraryTitle(path, fallback string) string {
 	if info.IsDir() {
 		return filepath.Base(path)
 	}
-	return filepath.Base(filepath.Dir(path))
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	name = strings.TrimSpace(name)
+	if name != "" {
+		return name
+	}
+	return fallback
 }
 
-func (w *Watcher) recordTorrentItem(source string, t TorrentInfo, mediaType, sourcePath, destinationPath, title, author, metadataTitle, metadataAuthor, format string, fileSize int64) (bool, error) {
+func (w *Watcher) recordTorrentItem(source string, t TorrentInfo, mediaType, sourcePath, destinationPath, title, author, metadataTitle, metadataAuthor, format string, fileSize int64, linkWanted bool) (bool, db.AddItemOutcome, error) {
 	if info, err := os.Stat(destinationPath); err == nil && info.Mode().IsRegular() {
 		fileSize = info.Size()
 	}
@@ -629,11 +641,13 @@ func (w *Watcher) recordTorrentItem(source string, t TorrentInfo, mediaType, sou
 	}
 	if err != nil {
 		slog.Error("torrent library import database failure", append(fields, "error", err)...)
-		return false, err
+		return false, outcome, err
 	}
 	slog.Info("torrent library import decision", fields...)
-	linkTorrentToWanted(w.db, w.organizer, w.cfg, t, outcome)
-	return outcome.Inserted, nil
+	if linkWanted {
+		linkTorrentToWanted(w.db, w.organizer, w.cfg, t, outcome)
+	}
+	return outcome.Inserted, outcome, nil
 }
 
 func fileFormat(filePath string) string {

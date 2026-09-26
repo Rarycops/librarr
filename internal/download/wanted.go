@@ -2,6 +2,7 @@ package download
 
 import (
 	"log/slog"
+	"path/filepath"
 	"strings"
 
 	"github.com/JeremiahM37/librarr/internal/config"
@@ -9,6 +10,7 @@ import (
 	"github.com/JeremiahM37/librarr/internal/models"
 	"github.com/JeremiahM37/librarr/internal/organize"
 	"github.com/JeremiahM37/librarr/internal/quality"
+	"github.com/JeremiahM37/librarr/internal/releases"
 )
 
 // importedFormat is the format recorded for a freshly imported file: what is
@@ -77,6 +79,38 @@ func linkTorrentToWanted(database *db.DB, organizer *organize.Organizer, cfg *co
 	settleWantedImport(database, organizer, cfg, item.ID, outcome, releaseRef{ref: ref, source: "torrent", infoHash: strings.ToLower(t.Hash)})
 }
 
+// linkTorrentMangaPackToWanted settles one multi-file manga torrent against the
+// active wanted row using the highest numbered volume imported from the pack.
+func linkTorrentMangaPackToWanted(database *db.DB, organizer *organize.Organizer, cfg *config.Config, t TorrentInfo, outcomes []db.AddItemOutcome) {
+	best := pickMangaPackOutcome(outcomes)
+	if best.ID == 0 {
+		return
+	}
+	linkTorrentToWanted(database, organizer, cfg, t, best)
+}
+
+func pickMangaPackOutcome(outcomes []db.AddItemOutcome) db.AddItemOutcome {
+	var best db.AddItemOutcome
+	var bestSeq float64
+	for _, outcome := range outcomes {
+		if outcome.ID == 0 {
+			continue
+		}
+		_, seq, ok := releases.ParseMangaReleaseText(filepath.Base(outcome.NormalizedPath))
+		if !ok {
+			if best.ID == 0 {
+				best = outcome
+			}
+			continue
+		}
+		if best.ID == 0 || seq >= bestSeq {
+			bestSeq = seq
+			best = outcome
+		}
+	}
+	return best
+}
+
 // settleWantedImport decides what a landed file means for its wanted row:
 //
 //   - no file yet            → the row is satisfied by it;
@@ -99,6 +133,12 @@ func settleWantedImport(database *db.DB, organizer *organize.Organizer, cfg *con
 	newFormat := strings.ToUpper(newItem.FileFormat)
 
 	if item.LibraryItemID != 0 {
+		if item.MediaType == "manga" && newItem.MediaType == "manga" &&
+			rel.infoHash != "" &&
+			strings.EqualFold(strings.TrimSpace(newItem.SourceID), strings.TrimSpace(rel.infoHash)) &&
+			item.LibraryItemID != outcome.ID {
+			return
+		}
 		profile := database.ResolveQualityProfile(item.QualityProfileID, item.MediaType).Profile()
 		notBetter := item.LibraryItemID == outcome.ID
 		reason := "delivered " + newFormat + " again"
