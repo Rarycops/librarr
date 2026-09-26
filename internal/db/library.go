@@ -481,6 +481,24 @@ func (d *DB) GetItems(mediaType string, limit, offset int) ([]models.LibraryItem
 	return scanLibraryItems(rows)
 }
 
+// FindItems filters before pagination and returns the matching total. instr
+// treats %, _ and quotes as literal search text rather than LIKE wildcards.
+func (d *DB) FindItems(mediaType, query string, limit, offset int) ([]models.LibraryItem, int, error) {
+	where := " WHERE (? = '' OR media_type = ?) AND (? = '' OR instr(lower(title), lower(?)) > 0 OR instr(lower(author), lower(?)) > 0)"
+	args := []interface{}{mediaType, mediaType, query, query, query}
+	var total int
+	if err := d.db.QueryRow("SELECT COUNT(*) FROM library_items"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := d.db.Query("SELECT "+libraryItemColumns+" FROM library_items"+where+" ORDER BY added_at DESC, id DESC LIMIT ? OFFSET ?", append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items, err := scanLibraryItems(rows)
+	return items, total, err
+}
+
 // CountItems counts library items, optionally filtered by media type.
 func (d *DB) CountItems(mediaType string) (int, error) {
 	var count int
@@ -515,7 +533,15 @@ func (d *DB) DeleteItem(id int64) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	result, err := d.db.Exec("DELETE FROM library_items WHERE id = ?", id)
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM item_tags WHERE item_id = ?", id); err != nil {
+		return err
+	}
+	result, err := tx.Exec("DELETE FROM library_items WHERE id = ?", id)
 	if err != nil {
 		return err
 	}
@@ -523,15 +549,31 @@ func (d *DB) DeleteItem(id int64) error {
 	if n == 0 {
 		return fmt.Errorf("item not found")
 	}
-	return nil
+	if _, err := tx.Exec("UPDATE wishlist SET library_item_id = 0 WHERE library_item_id = ?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DeleteItemBySourceID removes a library item by its source_id field.
 func (d *DB) DeleteItemBySourceID(sourceID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	_, err := d.db.Exec("DELETE FROM library_items WHERE source_id = ?", sourceID)
-	return err
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("UPDATE wishlist SET library_item_id = 0 WHERE library_item_id IN (SELECT id FROM library_items WHERE source_id = ?)", sourceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM item_tags WHERE item_id IN (SELECT id FROM library_items WHERE source_id = ?)", sourceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM library_items WHERE source_id = ?", sourceID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func scanLibraryItems(rows *sql.Rows) ([]models.LibraryItem, error) {
 	var items []models.LibraryItem

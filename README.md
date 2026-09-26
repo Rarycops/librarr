@@ -54,6 +54,8 @@ Librarr searches all configured indexers in parallel, scores results by confiden
 
 ### Library Management
 
+Without Audiobookshelf or Kavita configured, the library tabs show locally imported items with titles, authors, formats, and file sizes. Local library search matches titles and authors across all pages.
+
 - **Auto-import pipeline** -- organize files by author/title, rename on import (configurable pattern), scan into Calibre/Audiobookshelf/Kavita/Komga
 - **Series auto-complete** -- detect gaps in series, search for and download missing books
 - **Author monitoring** -- follow authors; the first check records their catalogue as a baseline, later checks add each new work to the wanted list (or only notify, per author)
@@ -212,12 +214,19 @@ behind TLS.
 | `OIDC_AUTO_CREATE_USERS` | `true` | Auto-create users on first OIDC login |
 | `OIDC_DEFAULT_ROLE` | `user` | Default role for OIDC-created users |
 | `OIDC_PROXY_HEADERS_ENABLED` | `false` | Trust Authentik identity headers from a reverse proxy |
+| `LIBRARR_TRUSTED_PROXIES` | | Comma-separated IPs/CIDRs of your reverse proxy. **Required for `OIDC_PROXY_HEADERS_ENABLED`**; also gates `X-Forwarded-Proto` |
 
 When `OIDC_PROXY_HEADERS_ENABLED=true` and Librarr sits behind a trusted reverse
 proxy that injects Authentik headers like `X-Authentik-Username`, it will treat
 those requests as an authenticated SSO session, auto-provision the local user if
 needed, and skip the manual "Login with SSO" click. Enable this only for
 proxy-gated deployments.
+Identity headers are honored **only** when the connection comes from an address
+in `LIBRARR_TRUSTED_PROXIES` (e.g. `LIBRARR_TRUSTED_PROXIES=172.18.0.5` or a
+Docker network CIDR). From any other peer they are ignored, and with the list
+empty they are always ignored — Librarr logs a warning at startup and users fall
+back to the "Login with SSO" button. Your proxy must also strip these headers
+from incoming client requests.
 Local logout only clears Librarr's session cookie; if the proxy keeps sending
 the identity header, the next request will sign the browser back in.
 
@@ -514,8 +523,16 @@ different format); that is what the UI's **Download anyway** button sends.
 | GET | `/api/library/manga` | List manga |
 | DELETE | `/api/library/book/{id}` | Remove ebook |
 | DELETE | `/api/library/audiobook/{id}` | Remove audiobook |
+| DELETE | `/api/library/manga/{id}` | Remove a local manga library record |
 | GET | `/api/stats` | Library statistics |
 | GET | `/api/activity` | Recent activity log |
+
+Removing a local library item preserves the file on disk and returns linked
+wanted entries to missing. Local ebooks, audiobooks, and manga all offer a
+confirmation before removal. Manga displayed from Kavita is managed through
+the **Open in Kavita** link; its series IDs are not Librarr item IDs. If Kavita
+is configured, API callers removing a local manga record must explicitly pass
+`?source=local` with the Librarr item ID.
 
 ### Requests
 
@@ -720,6 +737,13 @@ Librarr serves an OPDS 1.2 catalog at `/opds` for e-reader apps (KOReader, Moon+
 | `/opds/opensearch.xml` | OpenSearch descriptor |
 
 **Setup:** Add `http://your-librarr-host:5050/opds` as an OPDS catalog in your e-reader. If auth is enabled, enter your Librarr username and password.
+
+When auth is enabled every `/opds` route requires credentials (HTTP Basic, a
+browser session, or the API key). Accounts with two-factor auth enabled, and
+SSO-only accounts, cannot use their password here: enter the `API_KEY` value as
+the password instead (any username). Repeated failed logins from one address
+are temporarily blocked. Basic auth sends the password with every request, so
+use HTTPS when the feed is reachable beyond your LAN.
 
 ## Using Librarr with Claude / MCP
 

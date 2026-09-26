@@ -397,6 +397,25 @@
         "summary": "List manga"
       }
     },
+    "/api/library/manga/{id}": {
+      "delete": {
+        "summary": "Remove a local manga library record, preserving its file",
+        "description": "Unlinks wanted entries. Kavita series IDs are not local item IDs: manage those in Kavita. When Kavita is configured, source=local is required to explicitly select a local record.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["local"] }
+          }
+        ]
+      }
+    },
     "/api/library/book/{id}": {
       "delete": {
         "summary": "Remove an ebook from the library",
@@ -944,9 +963,11 @@
     "/opds": {
       "get": {
         "summary": "OPDS 1.2 catalog root",
-        "description": "Browse your library from e-reader apps (KOReader, Moon+ Reader, Librera).",
-        "security": [],
+        "description": "Browse your library from e-reader apps (KOReader, Moon+ Reader, Librera). When auth is enabled, all /opds routes require HTTP Basic credentials (or a session / API key).",
         "responses": {
+          "401": {
+            "description": "Authentication required (sends a WWW-Authenticate: Basic challenge)"
+          },
           "200": {
             "description": "Atom feed",
             "content": {

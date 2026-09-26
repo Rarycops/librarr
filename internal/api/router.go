@@ -57,6 +57,10 @@ func NewServer(cfg *config.Config, database *db.DB, searchMgr *search.Manager, d
 
 	// Configure which reverse proxies may set forwarded headers we honor.
 	setTrustedProxies(cfg.TrustedProxies)
+	if cfg.HasOIDCProxyHeaders() && !hasTrustedProxies() {
+		slog.Warn("OIDC_PROXY_HEADERS_ENABLED is set but LIBRARR_TRUSTED_PROXIES is empty or invalid: " +
+			"SSO identity headers will be ignored until the reverse proxy's address is listed there")
+	}
 
 	// Initialize webhook sender.
 	ws := webhook.NewSender()
@@ -316,6 +320,7 @@ func (s *Server) registerLibraryRoutes() {
 	s.mux.HandleFunc("GET /api/library/manga/cover", s.handleMangaCover)
 	s.mux.HandleFunc("DELETE /api/library/book/{id}", s.handleDeleteBook)
 	s.mux.HandleFunc("DELETE /api/library/audiobook/{id}", s.handleDeleteAudiobook)
+	s.mux.HandleFunc("DELETE /api/library/manga/{id}", s.handleDeleteManga)
 	s.mux.HandleFunc("GET /api/stats", s.handleStats)
 	s.mux.HandleFunc("GET /api/activity", s.handleActivity)
 
